@@ -120,16 +120,28 @@ class DiceRandom(ExplainerBase):
         cfs_df = None
         candidate_cfs = pd.DataFrame(
             np.repeat(query_instance.values, sample_size, axis=0), columns=query_instance.columns)
+        
         # Loop to change one feature at a time, then two features, and so on.
         for num_features_to_vary in range(1, len(self.features_to_vary)+1):
+            # randomly select which features to vary on this round
             selected_features = np.random.choice(self.features_to_vary, (sample_size, 1), replace=True)
-            # TODO: add in casual constraint checking here
+            
             for k in range(sample_size):
-                candidate_cfs.at[k, selected_features[k][0]] = random_instances.at[k, selected_features[k][0]]
+                feature_to_vary = selected_features[k][0]
+
+                # if feature_to_vary in 
+                # edit the original query instance with the random change to each selected feature
+                candidate_cfs.at[k, feature_to_vary] = random_instances.at[k, feature_to_vary]
                 # ensure candidate_cfs are valid in regard to causal constraints.
+
+                # if 
+                # check what the changed instance is, if it has a causal constraint then update this.
+            # predict the outcome for each modified instance
             scores = self.predict_fn(candidate_cfs)
             validity = self.decide_cf_validity(scores)
+
             if sum(validity) > 0:
+                # add rows that are valid from this set of candidates
                 rows_to_add = candidate_cfs[validity == 1]
 
                 if cfs_df is None:
@@ -144,6 +156,7 @@ class DiceRandom(ExplainerBase):
         self.total_cfs_found = 0
         self.valid_cfs_found = False
         if cfs_df is not None and len(cfs_df) > 0:
+            # if more than requested number of cfs were found randomly sample
             if len(cfs_df) > total_CFs:
                 cfs_df = cfs_df.sample(total_CFs)
             cfs_df.reset_index(inplace=True, drop=True)
