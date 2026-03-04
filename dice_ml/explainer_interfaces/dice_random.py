@@ -39,7 +39,7 @@ class DiceRandom(ExplainerBase):
                                   desired_class="opposite", permitted_range=None,
                                   features_to_vary="all", stopping_threshold=0.5, posthoc_sparsity_param=0.1,
                                   posthoc_sparsity_algorithm="linear", sample_size=1000, random_seed=None, verbose=False,
-                                  limit_steps_ls=10000):
+                                  limit_steps_ls=10000, causal_constraints=None):
         """Generate counterfactuals by randomly sampling features.
 
         :param query_instance: Test point of interest. A dictionary of feature names and values or a single row dataframe.
@@ -60,11 +60,17 @@ class DiceRandom(ExplainerBase):
         :param sample_size: Sampling size
         :param random_seed: Random seed for reproducibility
         :param limit_steps_ls: Defines an upper limit for the linear search step in the posthoc_sparsity_enhancement
+        :param causal_constraints: Defines causal constraints between features in the form of a dictionary with type 
+                                of constraint as key and list of features names as values. All possible types of constraint: 
+                                cannot_increase, cannot_decrease, must_increase_with, must_decrease_with, 
+                                inverse_with_increase, inverse_with_decrease.
 
         :returns: A CounterfactualExamples object that contains the dataframe of generated counterfactuals as an attribute.
         """
         self.features_to_vary = self.setup(features_to_vary, permitted_range, query_instance, feature_weights=None)
 
+        self.causal_constraints = self.validate_constraints(causal_constraints)
+        
         if features_to_vary == "all":
             self.fixed_features_values = {}
         else:
@@ -103,7 +109,12 @@ class DiceRandom(ExplainerBase):
         start_time = timeit.default_timer()
         random_instances = self.get_samples(
             self.fixed_features_values,
-            self.feature_range, sampling_random_seed=random_seed, sampling_size=sample_size)
+            self.feature_range, 
+            query_instance=query_instance,
+            causal_constraints=self.causal_constraints,
+            sampling_random_seed=random_seed, 
+            sampling_size=sample_size, 
+        )
         # Generate copies of the query instance that will be changed one feature
         # at a time to encourage sparsity.
         cfs_df = None
@@ -112,8 +123,10 @@ class DiceRandom(ExplainerBase):
         # Loop to change one feature at a time, then two features, and so on.
         for num_features_to_vary in range(1, len(self.features_to_vary)+1):
             selected_features = np.random.choice(self.features_to_vary, (sample_size, 1), replace=True)
+            # TODO: add in casual constraint checking here
             for k in range(sample_size):
                 candidate_cfs.at[k, selected_features[k][0]] = random_instances.at[k, selected_features[k][0]]
+                # ensure candidate_cfs are valid in regard to causal constraints.
             scores = self.predict_fn(candidate_cfs)
             validity = self.decide_cf_validity(scores)
             if sum(validity) > 0:
@@ -208,7 +221,7 @@ class DiceRandom(ExplainerBase):
                                           desired_range=desired_range,
                                           model_type=self.model.model_type)
 
-    def get_samples(self, fixed_features_values, feature_range, sampling_random_seed, sampling_size):
+    def get_samples(self, fixed_features_values, feature_range, query_instance, causal_constraints, sampling_random_seed, sampling_size):
 
         # first get required parameters
         precisions = self.data_interface.get_decimal_precisions(output_type="dict")
@@ -216,6 +229,15 @@ class DiceRandom(ExplainerBase):
         if sampling_random_seed is not None:
             random.seed(sampling_random_seed)
 
+        # set ranges based on causal constraints
+        if causal_constraints is not None:
+            for feature in self.data_interface.feature_names:
+                # TODO: does increase/decrease do the same for categorical? this is assuming they're continuous for now
+                if feature in causal_constraints["cannot_increase"]:
+                    feature_range[feature][1] = min(query_instance[feature].values[0], feature_range[feature][1])
+                if feature in causal_constraints["cannot_decrease"]:
+                    feature_range[feature][0] = max(query_instance[feature].values[0], feature_range[feature][0])
+                    
         samples = []
         for feature in self.data_interface.feature_names:
             if feature in fixed_features_values:
@@ -246,3 +268,13 @@ class DiceRandom(ExplainerBase):
             result = np.random.uniform(low, high+(10**-precision), size)
             result = [round(r, precision) for r in result]
         return result
+
+    def validate_constraints(self, constraints):
+        possible_constraints = ["cannot_increase", "cannot_decrease", "must_increase_with", "must_decrease_with", 
+                                "inverse_with_increase", "inverse_with_decrease"]
+        if constraints is not None:
+            for constraint in possible_constraints:
+                if constraint not in constraints:
+                    constraints[constraint] = []
+        
+        return constraints
