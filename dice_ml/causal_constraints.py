@@ -50,6 +50,10 @@ class CausalConstraints:
                 return False
         
         return True
+
+    # TODO: fill this in
+    def get_dependency_ordering(self, feature_names):
+        return ["education", "age", "hours_per_week", "income", "workclass", "marital_status", "occupation", "race", "gender"]
     
 
     def add_node(self, feature_name):

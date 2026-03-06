@@ -12,7 +12,7 @@ import pandas as pd
 from dice_ml import diverse_counterfactuals as exp
 from dice_ml.constants import ModelTypes
 from dice_ml.explainer_interfaces.explainer_base import ExplainerBase
-from causal_constraints import CausalConstraints
+from dice_ml.causal_constraints import CausalConstraints
 
 
 class DiceRandom(ExplainerBase):
@@ -112,7 +112,7 @@ class DiceRandom(ExplainerBase):
 
         # get random samples for each feature independently
         start_time = timeit.default_timer()
-        random_instances = self.get_samples(
+        random_instances, changes = self.get_samples(
             self.fixed_features_values,
             self.feature_range, 
             query_instance=query_instance,
@@ -124,8 +124,9 @@ class DiceRandom(ExplainerBase):
         # at a time to encourage sparsity.
         cfs_df = None
         candidate_cfs = pd.DataFrame(
-            np.repeat(query_instance.values, sample_size, axis=0), columns=query_instance.columns)
-        
+            np.repeat(query_instance.values, sample_size, axis=0), columns=query_instance.columns
+        )
+        dependencies = self.causal_constraints.constraints if self.causal_constraints is not None else None
         # Loop to change one feature at a time, then two features, and so on.
         for num_features_to_vary in range(1, len(self.features_to_vary)+1):
             # randomly select which features to vary on this round
@@ -133,14 +134,23 @@ class DiceRandom(ExplainerBase):
             
             for k in range(sample_size):
                 feature_to_vary = selected_features[k][0]
-
-                # if feature_to_vary in 
                 # edit the original query instance with the random change to each selected feature
                 candidate_cfs.at[k, feature_to_vary] = random_instances.at[k, feature_to_vary]
-                # ensure candidate_cfs are valid in regard to causal constraints.
 
-                # if 
-                # check what the changed instance is, if it has a causal constraint then update this.
+                # if other features depend on feature_to_vary --> we need to update the other features in cf
+                if changes is not None and dependencies is not None:
+                    for constraint in dependencies:
+                        if feature_to_vary in dependencies[constraint]:
+                            for dependent in dependencies[constraint][feature_to_vary]:
+                                candidate_cfs.at[k, dependent] = self.update_dependent_feature(
+                                    changes.at[k, feature_to_vary], 
+                                    dependent, 
+                                    query_instance[dependent].values[0],
+                                    self.feature_range,
+                                    constraint,
+                                    random_seed
+                                )
+
             # predict the outcome for each modified instance
             scores = self.predict_fn(candidate_cfs)
             validity = self.decide_cf_validity(scores)
@@ -240,22 +250,23 @@ class DiceRandom(ExplainerBase):
                                           model_type=self.model.model_type)
 
     def get_samples(self, fixed_features_values, feature_range, query_instance, causal_constraints, sampling_random_seed, sampling_size):
+        samples = None
+        changes = None
 
+        if causal_constraints is None:
+            samples = self._get_samples(fixed_features_values, feature_range, sampling_random_seed, sampling_size)
+        else:
+            samples, changes = self._get_samples_with_constraints(fixed_features_values, feature_range, query_instance, causal_constraints, sampling_random_seed, sampling_size)
+
+        return samples, changes
+
+    def _get_samples(self, fixed_features_values, feature_range, sampling_random_seed, sampling_size):
         # first get required parameters
         precisions = self.data_interface.get_decimal_precisions(output_type="dict")
 
         if sampling_random_seed is not None:
             random.seed(sampling_random_seed)
 
-        # set ranges based on causal constraints
-        if causal_constraints is not None:
-            for feature in self.data_interface.feature_names:
-                # TODO: does increase/decrease do the same for categorical? this is assuming they're continuous for now
-                if feature in causal_constraints["cannot_increase"]:
-                    feature_range[feature][1] = min(query_instance[feature].values[0], feature_range[feature][1])
-                if feature in causal_constraints["cannot_decrease"]:
-                    feature_range[feature][0] = max(query_instance[feature].values[0], feature_range[feature][0])
-                    
         samples = []
         for feature in self.data_interface.feature_names:
             if feature in fixed_features_values:
@@ -275,6 +286,70 @@ class DiceRandom(ExplainerBase):
         samples = pd.DataFrame(dict(zip(self.data_interface.feature_names, samples)))
         return samples
 
+    def _get_samples_with_constraints(self, fixed_features_values, feature_range, query_instance, causal_constraints, sampling_random_seed, sampling_size):
+        # first get required parameters
+        precisions = self.data_interface.get_decimal_precisions(output_type="dict")
+        dependencies = causal_constraints.constraints
+
+        if sampling_random_seed is not None:
+            random.seed(sampling_random_seed)
+
+        # set independent constraints
+        constraints = causal_constraints.single_constraints
+        for feature in self.data_interface.feature_names:
+            # TODO: does increase/decrease do the same for categorical? this is assuming they're continuous for now
+            if feature in constraints["cannot_increase"]:
+                feature_range[feature][1] = min(query_instance[feature].values[0], feature_range[feature][1])
+            if feature in constraints["cannot_decrease"]:
+                feature_range[feature][0] = max(query_instance[feature].values[0], feature_range[feature][0])
+            if feature in constraints["cannot_change"]:
+                feature_range[feature][0] = query_instance[feature].values[0]
+                feature_range[feature][1] = query_instance[feature].values[0]
+
+        
+        # generate random samples
+        samples = {}
+        # keep track of the changes to each feature
+        changes = {}
+        # TODO: needs to be ordered - start with one with no dependencies
+        # won't work with cyclic graphs -- just don't allow this for now???
+        for feature in causal_constraints.get_dependency_ordering(self.data_interface.feature_names):
+            samples[feature] = []
+            changes[feature] = []
+            original = query_instance[feature].values[0]
+            # TODO: remove fixed_feature_values
+            if feature in fixed_features_values:
+                sample = [fixed_features_values[feature]]*sampling_size
+            
+            # continuous features
+            elif feature in self.data_interface.continuous_feature_names:                    
+                low = feature_range[feature][0]
+                high = feature_range[feature][1]
+
+                # get random samples
+                sample = self.get_continuous_samples(
+                    low, high, precisions[feature], size=sampling_size,
+                    seed=sampling_random_seed)
+                
+                # get the changes to from the original value
+                change = np.where(samples == original, 0,
+                            np.where(samples < original, 1, 2))
+                
+            # categorical features
+            else:
+                # TODO: need to define an ordering for categorical values for constraints
+                if sampling_random_seed is not None:
+                    random.seed(sampling_random_seed)
+                sample = random.choices(feature_range[feature], k=sampling_size)
+                change = np.where(samples == original, 0, 3)
+
+            samples[feature] = sample
+            changes[feature] = change
+        samples = pd.DataFrame(samples)
+        changes = pd.DataFrame(changes)
+
+        return samples, changes
+
     def get_continuous_samples(self, low, high, precision, size=1000, seed=None):
         if seed is not None:
             np.random.seed(seed)
@@ -286,3 +361,37 @@ class DiceRandom(ExplainerBase):
             result = np.random.uniform(low, high+(10**-precision), size)
             result = [round(r, precision) for r in result]
         return result
+
+    
+    def update_dependent_feature(self, depends_on_change, dependent, original_value, feature_ranges, constraint_type, sampling_random_seed):
+        """ Return a value for the feature dependent because of the change to the dependent value.s
+
+        depends_on_change: value 0,1,2,3 representing no change, cont. decrease, cont. increase, cat. change respectively
+        dependent: feature name of the feature that needs to be updated because of the dependency
+        original_value: original value of the dependent feature that needs to be updated
+        feature_ranges: previous feature ranges
+        constraint_type: type of constraint between the two features from the CausalConstraints object
+
+        """
+        low = feature_ranges[dependent][0]
+        high = feature_ranges[dependent][1]
+
+        precisions = self.data_interface.get_decimal_precisions(output_type="dict")
+
+        new_value = original_value
+
+        # continuous features
+        if dependent in self.data_interface.continuous_feature_names:
+            if constraint_type == "increase_with" and depends_on_change == 2:
+                new_value = self.get_continuous_samples(original_value, high, precisions, size=1, seed=sampling_random_seed)[0]
+            elif constraint_type == "decrease_with" and depends_on_change == 1:
+                new_value = self.get_continuous_samples(low, original_value, precisions, size=1, seed=sampling_random_seed)[0]
+            elif constraint_type == "increase_on_decrease" and depends_on_change == 1:
+                new_value = self.get_continuous_samples(original_value, high, precisions, size=1, seed=sampling_random_seed)[0]
+            elif constraint_type == "decrease_on_increase" and depends_on_change == 2:
+                new_value = self.get_continuous_samples(low, original_value, precisions, size=1, seed=sampling_random_seed)[0]
+        
+        return new_value
+
+
+    
