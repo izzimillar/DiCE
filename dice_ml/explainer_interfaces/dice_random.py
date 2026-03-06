@@ -12,6 +12,7 @@ import pandas as pd
 from dice_ml import diverse_counterfactuals as exp
 from dice_ml.constants import ModelTypes
 from dice_ml.explainer_interfaces.explainer_base import ExplainerBase
+from causal_constraints import CausalConstraints
 
 
 class DiceRandom(ExplainerBase):
@@ -60,17 +61,21 @@ class DiceRandom(ExplainerBase):
         :param sample_size: Sampling size
         :param random_seed: Random seed for reproducibility
         :param limit_steps_ls: Defines an upper limit for the linear search step in the posthoc_sparsity_enhancement
-        :param causal_constraints: Defines causal constraints between features in the form of a dictionary with type 
-                                of constraint as key and list of features names as values. All possible types of constraint: 
-                                cannot_increase, cannot_decrease, must_increase_with, must_decrease_with, 
-                                inverse_with_increase, inverse_with_decrease.
+        :param causal_constraints: CausalConstraint object that defines causal constraints between features. Contains both
+                                    single and double constraints between features. 
 
         :returns: A CounterfactualExamples object that contains the dataframe of generated counterfactuals as an attribute.
         """
         self.features_to_vary = self.setup(features_to_vary, permitted_range, query_instance, feature_weights=None)
 
-        self.causal_constraints = self.validate_constraints(causal_constraints)
-        
+        # check constraints are valid
+        if not isinstance(causal_constraints, CausalConstraints):
+            print("Cannot use causal constraints. Not a valid CausalConstraints object.")
+            self.causal_constraints = None
+        else:
+            valid = causal_constraints.validate_constraint_features(self.data_interface.feature_names)
+            self.causal_constraints = causal_constraints if valid else None
+
         if features_to_vary == "all":
             self.fixed_features_values = {}
         else:
@@ -281,13 +286,3 @@ class DiceRandom(ExplainerBase):
             result = np.random.uniform(low, high+(10**-precision), size)
             result = [round(r, precision) for r in result]
         return result
-
-    def validate_constraints(self, constraints):
-        possible_constraints = ["cannot_increase", "cannot_decrease", "must_increase_with", "must_decrease_with", 
-                                "inverse_with_increase", "inverse_with_decrease"]
-        if constraints is not None:
-            for constraint in possible_constraints:
-                if constraint not in constraints:
-                    constraints[constraint] = []
-        
-        return constraints
