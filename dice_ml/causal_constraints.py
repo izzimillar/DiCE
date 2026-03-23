@@ -2,8 +2,11 @@ import graphviz
 from raiutils.exceptions import UserConfigValidationException
 
 class CausalConstraints:
-    def __init__(self, features):
-        self.feature_names = features
+    def __init__(self, data_interface):
+        self.data_interface = data_interface
+        self.feature_names = data_interface.feature_names
+        self.continuous_features = data_interface.continuous_feature_names
+        self.categorical_features = data_interface.categorical_feature_names
         # values consist of:
         # depends_on : [ feature1, feature2, ... ]
         # depends_on --> feature1
@@ -49,10 +52,10 @@ class CausalConstraints:
                     )
                 return False
         
-        return True    
-
-    def add_node(self, feature_name):
-        self.feature_names.append(feature_name)
+        return True
+    
+    def update_data_interface(self, data_interface):
+        self.data_interface = data_interface
     
     def add_constraint(self, constraint_type, feature, depends_on, inverse=False):
         """
@@ -113,6 +116,14 @@ class CausalConstraints:
                 "Not a valid feature. Please make sure you have added the feature before adding a constraint."
                 )
         
+        if (feature in self.categorical_features 
+            and feature not in self.data_interface.categorical_features_ordering 
+            and constraint_type in ["cannot_decrease", "cannot_increase"]
+        ):
+            raise UserConfigValidationException(
+                "This is a categorical feature that does not have an ordering. Please update the data_interface."
+                )
+
         current_constraints = self.single_constraints[constraint_type]
 
         if feature not in current_constraints:

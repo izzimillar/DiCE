@@ -50,6 +50,7 @@ class PublicData(_BaseData):
             name) for name in self.categorical_feature_names if name in self.data_df]
 
         self._validate_and_set_continuous_features_precision(params=params)
+        self._validate_and_set_categorical_order(params=params)
         self.data_df = self._set_feature_dtypes(
                 self.data_df,
                 self.categorical_feature_names,
@@ -101,6 +102,27 @@ class PublicData(_BaseData):
                     )
         else:
             self.continuous_features_precision = None
+    
+    def _validate_and_set_categorical_order(self, params):
+        """ Validate and set the order of categorical features."""
+        if 'categorical_features_ordering' in params:
+            self.categorical_features_ordering = params['categorical_features_ordering']
+
+            if not hasattr(self, 'feature_names'):
+                raise SystemException('Feature names not correctly set in public data interface')
+
+            for categorical_feature_name in self.categorical_features_ordering:
+                if categorical_feature_name not in self.feature_names:
+                    raise UserConfigValidationException(
+                        "continuous_features_precision contains some feature names which are not part of columns in dataframe"
+                    )
+                
+                if set(self.categorical_features_ordering[categorical_feature_name]) != set(self.data_df[categorical_feature_name].unique().tolist()):
+                    raise UserConfigValidationException(
+                        f"categorical_features_ordering of feature {categorical_feature_name} and valid values of feature {categorical_feature_name} are not equal"
+                    )
+        else:
+            self.categorical_features_ordering = None
 
     def _set_feature_dtypes(self, data_df, categorical_feature_names,
                             continuous_feature_names):
@@ -128,7 +150,10 @@ class PublicData(_BaseData):
             ranges[feature_name] = [
                 self.data_df[feature_name].min(), self.data_df[feature_name].max()]
         for feature_name in self.categorical_feature_names:
-            ranges[feature_name] = self.data_df[feature_name].unique().tolist()
+            if feature_name in self.categorical_features_ordering:
+                ranges[feature_name] = self.categorical_features_ordering[feature_name]
+            else:
+                ranges[feature_name] = self.data_df[feature_name].unique().tolist()
         feature_ranges_orig = ranges.copy()
         # Overwriting the ranges for a feature if input provided
         if permitted_range_input is not None:

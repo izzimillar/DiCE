@@ -120,6 +120,7 @@ class DiceRandom(ExplainerBase):
             sampling_random_seed=random_seed, 
             sampling_size=sample_size, 
         )
+
         # Generate copies of the query instance that will be changed one feature
         # at a time to encourage sparsity.
         cfs_df = None
@@ -138,7 +139,7 @@ class DiceRandom(ExplainerBase):
                 for feature_to_vary in features_to_vary:
                     # edit the original query instance with the random change to each selected feature
                     candidate_cfs.at[k, feature_to_vary] = random_instances.at[k, feature_to_vary]
-                    
+
                     # if other features depend on feature_to_vary --> we need to update the other features in cf
                     if changes is not None and dependencies is not None:
                         for constraint in dependencies:
@@ -159,6 +160,7 @@ class DiceRandom(ExplainerBase):
                                         changes.at[k, dependent] = change
                                         # update the random instances dictionary to reflect the change
                                         random_instances.at[k, dependent] = new_value
+                                        candidate_cfs.at[k, dependent] = new_value
                                         # check for cascading dependencies
                                         # WARNING: there's a possibility of an infinite loop here
                                         features_to_vary.append(dependent)
@@ -303,7 +305,6 @@ class DiceRandom(ExplainerBase):
     def _get_samples_with_constraints(self, fixed_features_values, feature_range, query_instance, causal_constraints, sampling_random_seed, sampling_size):
         # first get required parameters
         precisions = self.data_interface.get_decimal_precisions(output_type="dict")
-        dependencies = causal_constraints.constraints
 
         if sampling_random_seed is not None:
             random.seed(sampling_random_seed)
@@ -311,22 +312,31 @@ class DiceRandom(ExplainerBase):
         # set independent constraints
         constraints = causal_constraints.single_constraints
         for feature in self.data_interface.feature_names:
-            # TODO: does increase/decrease do the same for categorical? this is assuming they're continuous for now
-            if feature in constraints["cannot_increase"]:
-                feature_range[feature][1] = min(query_instance[feature].values[0], feature_range[feature][1])
-            if feature in constraints["cannot_decrease"]:
-                feature_range[feature][0] = max(query_instance[feature].values[0], feature_range[feature][0])
-            if feature in constraints["cannot_change"]:
-                feature_range[feature][0] = query_instance[feature].values[0]
-                feature_range[feature][1] = query_instance[feature].values[0]
+            # continuous features
+            if feature in self.data_interface.continuous_feature_names:
+                if feature in constraints["cannot_increase"]:
+                    feature_range[feature][1] = min(query_instance[feature].values[0], feature_range[feature][1])
+                if feature in constraints["cannot_decrease"]:
+                    feature_range[feature][0] = max(query_instance[feature].values[0], feature_range[feature][0])
+                if feature in constraints["cannot_change"]:
+                    feature_range[feature][0] = query_instance[feature].values[0]
+                    feature_range[feature][1] = query_instance[feature].values[0]
+            # categorical
+            else:
+                current_index = feature_range[feature].index(query_instance[feature].values[0])
+                if feature in constraints["cannot_increase"]:
+                    feature_range[feature] = feature_range[feature][:(current_index + 1)]
+                if feature in constraints["cannot_decrease"]:
+                    feature_range[feature] = feature_range[feature][current_index:]
+                if feature in constraints["cannot_change"]:
+                    feature_range[feature] = [feature_range[feature][current_index]]
+
 
         
         # generate random samples
         samples = {}
         # keep track of the changes to each feature
         changes = {}
-        # TODO: needs to be ordered - start with one with no dependencies
-        # won't work with cyclic graphs -- just don't allow this for now???
         for feature in self.data_interface.feature_names:
             samples[feature] = []
             changes[feature] = []
@@ -334,7 +344,7 @@ class DiceRandom(ExplainerBase):
             # TODO: remove fixed_feature_values
             if feature in fixed_features_values:
                 sample = [fixed_features_values[feature]]*sampling_size
-            
+
             # continuous features
             elif feature in self.data_interface.continuous_feature_names:                    
                 low = feature_range[feature][0]
@@ -351,11 +361,19 @@ class DiceRandom(ExplainerBase):
                 
             # categorical features
             else:
-                # TODO: need to define an ordering for categorical values for constraints
-                if sampling_random_seed is not None:
-                    random.seed(sampling_random_seed)
-                sample = random.choices(feature_range[feature], k=sampling_size)
-                change = np.where(sample == original, 0, 3)
+                sample = self.get_categorical_samples(
+                    original, feature_range[feature], size=sampling_size, seed=sampling_random_seed
+                )
+                if feature in self.data_interface.categorical_features_ordering:
+                    original_index = feature_range[feature].index(original)
+                    new_indices = np.zeros(len(sample))
+                    for i, f in enumerate(feature_range[feature]):
+                        new_indices[np.where(np.array(sample) == f)] = i
+                    diff = original_index - new_indices
+                    change = np.where(diff == 0, 0, np.where(diff > 0, 1, 2))
+
+                else:
+                    change = np.where(np.array(sample) == original, 0, 3)
 
             samples[feature] = sample
             changes[feature] = change
@@ -375,20 +393,39 @@ class DiceRandom(ExplainerBase):
             result = np.random.uniform(low, high+(10**-precision), size)
             result = [round(r, precision) for r in result]
         return result
+    
+    def get_categorical_samples(self, current, feature_values, ordered=False, order=0, size=1000, seed=None):
+        if seed is not None:
+            random.seed(seed)
+        
+        sample = None
+
+        if ordered:
+            # order = 1: decrease value
+            if order == 1:
+                index = feature_values.index(current)
+                sample = random.choices(feature_values[:index], k=size)
+            # order = 2: increase value
+            elif order == 2:
+                index = feature_values.index(current)
+                sample = random.choices(feature_values[index:], k=size)
+        # no constraint or no ordering
+        else:
+            sample = random.choices(feature_values, k=size)
+
+        return sample
 
     
-    def update_dependent_feature(self, depends_on_change, dependent, original_value, feature_ranges, constraint_type, sampling_random_seed):
+    def update_dependent_feature(self, depends_on_change, feature_to_change, original_value, feature_ranges, constraint_type, sampling_random_seed):
         """ Return a value for the feature dependent because of the change to the dependent value.s
 
-        depends_on_change: value 0,1,2,3 representing no change, cont. decrease, cont. increase, cat. change respectively
-        dependent: feature name of the feature that needs to be updated because of the dependency
+        depends_on_change: value 0,1,2,3 representing no change, decrease, increase, cat. change respectively
+        feature_to_change: feature name of the feature that needs to be updated because of the dependency
         original_value: original value of the dependent feature that needs to be updated
         feature_ranges: previous feature ranges
         constraint_type: type of constraint between the two features from the CausalConstraints object
 
         """
-        low = feature_ranges[dependent][0]
-        high = feature_ranges[dependent][1]
 
         precisions = self.data_interface.get_decimal_precisions(output_type="dict")
 
@@ -396,18 +433,37 @@ class DiceRandom(ExplainerBase):
         change = 0
 
         # continuous features
-        if dependent in self.data_interface.continuous_feature_names:
+        if feature_to_change in self.data_interface.continuous_feature_names:
+            low = feature_ranges[feature_to_change][0]
+            high = feature_ranges[feature_to_change][1]
+
             if constraint_type == "increase_with" and depends_on_change == 2:
-                new_value = self.get_continuous_samples(original_value, high, precisions, size=1, seed=sampling_random_seed)[0]
+                new_value = self.get_continuous_samples(original_value, high, precisions[feature_to_change], size=1, seed=sampling_random_seed)[0]
                 change = 2
             elif constraint_type == "decrease_with" and depends_on_change == 1:
-                new_value = self.get_continuous_samples(low, original_value, precisions, size=1, seed=sampling_random_seed)[0]
+                new_value = self.get_continuous_samples(low, original_value, precisions[feature_to_change], size=1, seed=sampling_random_seed)[0]
                 change = 1
             elif constraint_type == "increase_on_decrease" and depends_on_change == 1:
-                new_value = self.get_continuous_samples(original_value, high, precisions, size=1, seed=sampling_random_seed)[0]
+                new_value = self.get_continuous_samples(original_value, high, precisions[feature_to_change], size=1, seed=sampling_random_seed)[0]
                 change = 2
             elif constraint_type == "decrease_on_increase" and depends_on_change == 2:
-                new_value = self.get_continuous_samples(low, original_value, precisions, size=1, seed=sampling_random_seed)[0]
+                new_value = self.get_continuous_samples(low, original_value, precisions[feature_to_change], size=1, seed=sampling_random_seed)[0]
+                change = 1
+        # categorical features
+        else:
+            ordering = feature_ranges[feature_to_change]
+            ordered_values = feature_to_change in self.data_interface.categorical_features_ordering
+            if constraint_type == "increase_with" and depends_on_change == 2:
+                new_value = self.get_categorical_samples(original_value, ordering, ordered=ordered_values, order=2, size=1, seed=sampling_random_seed)[0]
+                change = 2
+            elif constraint_type == "decrease_with" and depends_on_change == 1:
+                new_value = self.get_categorical_samples(original_value, ordering, ordered=ordered_values, order=1, size=1, seed=sampling_random_seed)[0]
+                change = 1
+            elif constraint_type == "increase_on_decrease" and depends_on_change == 1:
+                new_value = self.get_categorical_samples(original_value, ordering, ordered=ordered_values, order=2, size=1, seed=sampling_random_seed)[0]
+                change = 2
+            elif constraint_type == "decrease_on_increase" and depends_on_change == 2:
+                new_value = self.get_categorical_samples(original_value, ordering, ordered=ordered_values, order=1, size=1, seed=sampling_random_seed)[0]
                 change = 1
         
         return new_value, change
