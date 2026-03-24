@@ -150,7 +150,7 @@ class PublicData(_BaseData):
             ranges[feature_name] = [
                 self.data_df[feature_name].min(), self.data_df[feature_name].max()]
         for feature_name in self.categorical_feature_names:
-            if feature_name in self.categorical_features_ordering:
+            if self.categorical_features_ordering is not None and feature_name in self.categorical_features_ordering:
                 ranges[feature_name] = self.categorical_features_ordering[feature_name]
             else:
                 ranges[feature_name] = self.data_df[feature_name].unique().tolist()

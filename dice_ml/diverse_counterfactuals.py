@@ -267,3 +267,15 @@ class CounterfactualExamples:
                                           desired_class=desired_class,
                                           desired_range=desired_range,
                                           model_type=model_type)
+
+    def calculate_validity(self, expected_cfs):
+        return len(self.final_cfs_df) / expected_cfs
+
+    def calculate_proximity(self):
+        proximity = 0
+        for feature in self.final_cfs_df:
+            if feature in self.data_interface.continuous_feature_names:
+                pass
+            else:
+                pass
+        return proximity

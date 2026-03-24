@@ -70,7 +70,7 @@ class DiceRandom(ExplainerBase):
 
         # check constraints are valid
         if not isinstance(causal_constraints, CausalConstraints):
-            print("Cannot use causal constraints. Not a valid CausalConstraints object.")
+            print("Generating counterfactuals without using casual constraints. Some counterfactuals may not be actionable.")
             self.causal_constraints = None
         else:
             valid = causal_constraints.validate_constraint_features(self.data_interface.feature_names)
@@ -149,13 +149,14 @@ class DiceRandom(ExplainerBase):
                                         changes.at[k, feature_to_vary], 
                                         dependent, 
                                         query_instance[dependent].values[0],
+                                        candidate_cfs.at[k, dependent],
                                         self.feature_range,
                                         constraint,
                                         random_seed
                                     )
                                     
                                     if change > 0:
-                                        # if the dependent feature is actually changed
+                                        # only update if the dependent feature has actually been changed
                                         # update the changed dictionary
                                         changes.at[k, dependent] = change
                                         # update the random instances dictionary to reflect the change
@@ -416,12 +417,14 @@ class DiceRandom(ExplainerBase):
         return sample
 
     
-    def update_dependent_feature(self, depends_on_change, feature_to_change, original_value, feature_ranges, constraint_type, sampling_random_seed):
+    def update_dependent_feature(self, change_of_depends_on, feature_to_change, original_value, current_value, feature_ranges, constraint_type, sampling_random_seed):
         """ Return a value for the feature dependent because of the change to the dependent value.s
 
-        depends_on_change: value 0,1,2,3 representing no change, decrease, increase, cat. change respectively
+        change_of_depends_on: value 0,1,2,3 representing no change, decrease, increase, cat. change respectively
         feature_to_change: feature name of the feature that needs to be updated because of the dependency
-        original_value: original value of the dependent feature that needs to be updated
+        original_value: original value of the dependent feature
+        current_value: current value of the dependent feature in the counterfactual. The same as original_value 
+                        if there have been no changes to this feature for this counterfactual.
         feature_ranges: previous feature ranges
         constraint_type: type of constraint between the two features from the CausalConstraints object
 
@@ -430,43 +433,67 @@ class DiceRandom(ExplainerBase):
         precisions = self.data_interface.get_decimal_precisions(output_type="dict")
 
         new_value = original_value
-        change = 0
-
+        change = self._how_should_feature_change(change_of_depends_on, feature_to_change, original_value, current_value, constraint_type, feature_ranges)
+        
         # continuous features
         if feature_to_change in self.data_interface.continuous_feature_names:
             low = feature_ranges[feature_to_change][0]
             high = feature_ranges[feature_to_change][1]
 
-            if constraint_type == "increase_with" and depends_on_change == 2:
-                new_value = self.get_continuous_samples(original_value, high, precisions[feature_to_change], size=1, seed=sampling_random_seed)[0]
-                change = 2
-            elif constraint_type == "decrease_with" and depends_on_change == 1:
+            if change == 1:
                 new_value = self.get_continuous_samples(low, original_value, precisions[feature_to_change], size=1, seed=sampling_random_seed)[0]
-                change = 1
-            elif constraint_type == "increase_on_decrease" and depends_on_change == 1:
+            elif change == 2:
                 new_value = self.get_continuous_samples(original_value, high, precisions[feature_to_change], size=1, seed=sampling_random_seed)[0]
-                change = 2
-            elif constraint_type == "decrease_on_increase" and depends_on_change == 2:
-                new_value = self.get_continuous_samples(low, original_value, precisions[feature_to_change], size=1, seed=sampling_random_seed)[0]
-                change = 1
         # categorical features
         else:
             ordering = feature_ranges[feature_to_change]
             ordered_values = feature_to_change in self.data_interface.categorical_features_ordering
-            if constraint_type == "increase_with" and depends_on_change == 2:
-                new_value = self.get_categorical_samples(original_value, ordering, ordered=ordered_values, order=2, size=1, seed=sampling_random_seed)[0]
-                change = 2
-            elif constraint_type == "decrease_with" and depends_on_change == 1:
-                new_value = self.get_categorical_samples(original_value, ordering, ordered=ordered_values, order=1, size=1, seed=sampling_random_seed)[0]
-                change = 1
-            elif constraint_type == "increase_on_decrease" and depends_on_change == 1:
-                new_value = self.get_categorical_samples(original_value, ordering, ordered=ordered_values, order=2, size=1, seed=sampling_random_seed)[0]
-                change = 2
-            elif constraint_type == "decrease_on_increase" and depends_on_change == 2:
-                new_value = self.get_categorical_samples(original_value, ordering, ordered=ordered_values, order=1, size=1, seed=sampling_random_seed)[0]
-                change = 1
+
+            if change == 1:
+                new_value = self.get_categorical_samples(original_value, ordering, ordered=ordered_values, order=change, size=1, seed=sampling_random_seed)[0]
+            elif change == 2:
+                new_value = self.get_categorical_samples(original_value, ordering, ordered=ordered_values, order=change, size=1, seed=sampling_random_seed)[0]
         
         return new_value, change
 
-
-    
+    def _how_should_feature_change(self, change_of_depends_on, feature_to_change, original_value, current_value, constraint_type, feature_ranges):
+        current_change = 0
+        diff = 0
+        # get the change from the original value if there has already been one
+        # continuous
+        if feature_to_change in self.data_interface.continuous_feature_names:
+            diff = original_value - current_value
+            current_change = 0 if diff == 0 else 1 if diff > 0 else 2
+        # categorical
+        else:
+            if feature_to_change in self.data_interface.categorical_features_ordering:
+                original_index = feature_ranges[feature_to_change].index(original_value)
+                current_index = feature_ranges[feature_to_change].index(current_value)
+                diff = original_index - current_index
+                current_change = 0 if diff == 0 else 1 if diff > 0 else 2
+            else:
+                if original_value == current_value:
+                    current_change = 0
+                else:
+                    current_change = 3
+        
+        should_change = 0
+        if (
+            (constraint_type == "increase_with" and change_of_depends_on == 2) 
+            or 
+            (constraint_type == "increase_on_decrease" and change_of_depends_on == 1)
+        ):
+            should_change = 2
+        elif (
+            (constraint_type == "decrease_with" and change_of_depends_on == 1) 
+            or 
+            (constraint_type == "decrease_on_increase" and change_of_depends_on == 2)
+        ):
+            should_change = 1
+        
+        # if the feature has already changed how it should have done we don't need to update it
+        if should_change == current_change:
+            return 0
+        # otherwise return should_change independent of any changes made already
+        else:
+            return should_change

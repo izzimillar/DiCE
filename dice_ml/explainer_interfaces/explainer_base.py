@@ -268,7 +268,7 @@ class ExplainerBase(ABC):
         for feature in self.data_interface.categorical_feature_names:
             if query_instance[feature].values[0] not in feature_ranges_orig[feature] and \
                     str(query_instance[feature].values[0]) not in feature_ranges_orig[feature]:
-                raise ValueError("Feature", feature, "has a value outside the dataset.")
+                raise ValueError("Feature", feature, "has a value outside the dataset.", str(query_instance[feature].values[0]))
 
             if feature not in features_to_vary and permitted_range is not None:
                 if feature in permitted_range and feature in self.data_interface.continuous_feature_names:

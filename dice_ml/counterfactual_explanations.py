@@ -110,6 +110,21 @@ class CounterfactualExplanations:
             cf_examples.visualize_as_list(
                     display_sparse_df=display_sparse_df,
                     show_only_changes=show_only_changes)
+    
+    def calculate_validity(self, expected_cfs):
+        validity = 0
+        for cf_examples in self.cf_examples_list:
+            validity += cf_examples.calculate_validity(expected_cfs)
+        
+        return validity / len(self.cf_examples_list)
+
+    def calculate_proximity(self):
+        proximity = 0
+        for cf_examples in self.cf_examples_list:
+            proximity += cf_examples.calculate_proximity()
+        
+        return proximity / len(self.cf_examples_list)
+
 
     @staticmethod
     def _check_cf_exp_output_against_json_schema(
