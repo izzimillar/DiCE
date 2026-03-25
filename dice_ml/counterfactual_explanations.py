@@ -118,19 +118,47 @@ class CounterfactualExplanations:
         
         return validity / len(self.cf_examples_list)
 
-    def calculate_proximity(self):
+    def calculate_cat_proximity(self):
         proximity = 0
         for cf_examples in self.cf_examples_list:
-            proximity += cf_examples.calculate_proximity()
+            proximity += cf_examples.calculate_cat_proximity()
         
         return proximity / len(self.cf_examples_list)
 
+    def calculate_cont_proximity(self):
+        proximity = 0
+        for cf_examples in self.cf_examples_list:
+            proximity += cf_examples.calculate_cont_proximity()
+        
+        return proximity / len(self.cf_examples_list)
+    
     def calculate_cat_diversity(self):
-        pass
-
+        diversity = 0
+        for cf_examples in self.cf_examples_list:
+            diversity += cf_examples.calculate_cat_diversity()
+        
+        return diversity / len(self.cf_examples_list)
+    
     def calculate_cont_diversity(self):
-        pass
+        diversity = 0
+        for cf_examples in self.cf_examples_list:
+            diversity += cf_examples.calculate_cont_diversity()
+        
+        return diversity / len(self.cf_examples_list)
 
+    def calculate_count_diversity(self):
+        diversity = 0
+        for cf_examples in self.cf_examples_list:
+            diversity += cf_examples.calculate_count_diversity()
+        
+        return diversity / len(self.cf_examples_list)
+
+    def calculate_cont_sparsity(self):
+        sparsity = 0
+        for cf_examples in self.cf_examples_list:
+            sparsity += cf_examples.calculate_cont_sparsity()
+        
+        return sparsity / len(self.cf_examples_list)
 
     @staticmethod
     def _check_cf_exp_output_against_json_schema(

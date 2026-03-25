@@ -270,12 +270,121 @@ class CounterfactualExamples:
 
     def calculate_validity(self, expected_cfs):
         return len(self.final_cfs_df) / expected_cfs
+    
+    def calculate_cont_distance(self, cf, x=None):
+        """  dist_cont(c, x) = 1/cont_count * sum p((cp - xp)/MADp) """
+        x = x if x is not None else self.test_instance_df.iloc[0]
+        mads = self.data_interface.get_valid_mads()
+        cont_features = self.data_interface.continuous_feature_names
 
-    def calculate_proximity(self):
+        dist = 0
+        for feature in cont_features:
+            dist += (abs(cf[feature] - x[feature]))/mads[feature]
+        
+        return dist / len(cont_features)
+    
+    def calculate_cat_distance(self, cf, x=None):
+        """ dist_cat(c,x) = 1/cat_count * sum p(I(cp = xp))"""
+        x = x if x is not None else self.test_instance_df.iloc[0]
+        cat_features = self.data_interface.categorical_feature_names
+
+        dist = 0
+        for feature in cat_features:
+            if cf[feature] != x[feature]:
+                dist += 1
+        
+        return dist / len(cat_features)
+
+
+    def calculate_cont_proximity(self):
+        """ Continuous proximity measure.
+        defined as cont_prox = -1/count * sum(dist_cont(c, x))
+
+        where dist_cont(c, x) = 1/cont_count * sum p((cp - xp)/MADp)
+        """
         proximity = 0
-        for feature in self.final_cfs_df:
-            if feature in self.data_interface.continuous_feature_names:
-                pass
-            else:
-                pass
-        return proximity
+        cfs = self.final_cfs_df
+
+        for i in range(len(self.final_cfs_df)):
+            proximity += self.calculate_cont_distance(cfs.iloc[i])
+
+        proximity = (proximity / len(self.final_cfs_df))
+
+        return -proximity
+
+
+    def calculate_cat_proximity(self):
+        """ Categorical proximity measure.
+        defined as cat_prox = 1-1/count * sum(dist_cat(c, x))
+
+        where dist_cat(c,x) = 1/cat_count * sum p(I(cp = xp))
+        """
+
+        distance = 0
+        cfs = self.final_cfs_df
+
+        for i in range(len(self.final_cfs_df)):
+            distance += self.calculate_cat_distance(cfs.iloc[i])
+        
+        proximity = distance / len(self.final_cfs_df)
+        return 1 - proximity
+    
+    def calculate_cat_diversity(self):
+        """ Categorical diversity metric.
+        
+        1\choose 2 k sum i( sum j(dist_cat (ci cj))) 
+        """
+
+        diversity = 0
+        cfs = self.final_cfs_df
+
+        for i in range(len(cfs) - 1):
+            for j in range(i+1, len(cfs)):
+                diversity += self.calculate_cat_distance(cfs.iloc[i], cfs.iloc[j])
+        
+        diversity = 1/math.comb(len(cfs), 2) * diversity
+        return diversity
+
+    def calculate_cont_diversity(self):
+        """ Continuous diversity metric.
+        
+        1\choose 2 k sum i( sum j(dist_cont (ci cj))) 
+        """
+        diversity = 0
+        cfs = self.final_cfs_df
+
+        for i in range(len(cfs) - 1):
+            for j in range(i+1, len(cfs)):
+                diversity += self.calculate_cont_distance(cfs.iloc[i], cfs.iloc[j])
+        
+        diversity = 1/math.comb(len(cfs), 2) * diversity
+        return diversity
+    
+    def calculate_count_diversity(self):
+        """ Count diversity. Measures the number of features that differ.
+        
+        """
+        diversity = 0
+        cfs = self.final_cfs_df
+        
+        for i in range(len(cfs) - 1):
+            for j in range(i+1, len(cfs)):
+                for feature in self.data_interface.feature_names:
+                    if cfs.iloc[i][feature] != cfs.iloc[j][feature]:
+                        diversity += 1
+        
+        diversity = 1/(math.comb(len(cfs), 2) * self.data_interface.number_of_features) * diversity
+        return diversity
+
+    def calculate_cont_sparsity(self):
+        sparsity = 0
+        x = self.test_instance_df
+        cfs = self.final_cfs_df
+        
+        for i in range(len(self.final_cfs_df)):
+            for feature in self.data_interface.continuous_feature_names:
+                if cfs.iloc[i][feature] != x[feature].values[0]:
+                    sparsity += 1
+
+        sparsity = 1/(len(self.final_cfs_df) * len(self.data_interface.continuous_feature_names)) * sparsity
+        return sparsity
