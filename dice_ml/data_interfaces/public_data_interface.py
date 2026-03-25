@@ -143,7 +143,7 @@ class PublicData(_BaseData):
                         np.int32)
         return data_df
 
-    def get_features_range(self, permitted_range_input=None, features_dict=None):
+    def get_features_range(self, permitted_range_input=None, causal_constraints=None, features_dict=None):
         ranges = {}
         # Getting default ranges based on the dataset
         for feature_name in self.continuous_feature_names:
@@ -249,8 +249,10 @@ class PublicData(_BaseData):
                 feature_range[feature_name] = feature_range_input[feature_name]
         return feature_range
 
-    def get_minx_maxx(self, normalized=True):
+    def get_minx_maxx(self, normalized=True, range=None):
         """Gets the min/max value of features in normalized or de-normalized form."""
+        range = range if range is not None else self.permitted_range
+
         minx = np.array([[0.0] * len(self.ohe_encoded_feature_names)])
         maxx = np.array([[1.0] * len(self.ohe_encoded_feature_names)])
 
@@ -259,13 +261,13 @@ class PublicData(_BaseData):
             min_value = self.data_df[feature_name].min()
 
             if normalized:
-                minx[0][idx] = (self.permitted_range[feature_name]
+                minx[0][idx] = (range[feature_name]
                                 [0] - min_value) / (max_value - min_value)
-                maxx[0][idx] = (self.permitted_range[feature_name]
+                maxx[0][idx] = (range[feature_name]
                                 [1] - min_value) / (max_value - min_value)
             else:
-                minx[0][idx] = self.permitted_range[feature_name][0]
-                maxx[0][idx] = self.permitted_range[feature_name][1]
+                minx[0][idx] = range[feature_name][0]
+                maxx[0][idx] = range[feature_name][1]
         return minx, maxx
 
     def get_mads(self, normalized=False):

@@ -163,7 +163,35 @@ class CausalConstraints:
         return changes
                 
 
+    def set_feature_ranges(self, query_instance, feature_ranges):        
+        for constraint in self.single_constraints:
+            for feature in self.single_constraints[constraint]:
+                # continuous
+                if feature in self.data_interface.continuous_feature_names:
+                    low = feature_ranges[feature][0]
+                    high = feature_ranges[feature][1]
+                    if constraint == "cannot_increase":
+                        feature_ranges[feature][1] = min(query_instance[feature].values[0], low)
+                    elif constraint == "cannot_decrease":
+                        self.feature_range[feature][0] = max(query_instance[feature].values[0], high)
+                    elif constraint == "cannot_change":
+                        feature_ranges[feature][0] = query_instance[feature].values[0]
+                        feature_ranges[feature][1] = query_instance[feature].values[0]
+                # categorical
+                else:
+                    if feature in self.data_interface.categorical_features_ordering:
+                        current_index = feature_ranges[feature].index(query_instance[feature].values[0])
+                        if constraint == "cannot_increase":
+                            feature_ranges[feature] = feature_ranges[feature][:(current_index + 1)]
+                        elif constraint == "cannot_decrease":
+                            feature_ranges[feature] = feature_ranges[feature][current_index:]
+                        elif constraint == "cannot_change":
+                            feature_ranges[feature] = [feature_ranges[feature][current_index]]
+                    else:
+                        if constraint == "cannot_change":
+                            feature_ranges[feature] = [feature_ranges[feature][current_index]]
         
+        return feature_ranges
 
     def create_constraint_visualisation(self):
         dot = graphviz.Digraph()

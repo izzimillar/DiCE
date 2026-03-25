@@ -83,6 +83,9 @@ class DiceRandom(ExplainerBase):
             for feature in self.data_interface.feature_names:
                 if feature not in features_to_vary:
                     self.fixed_features_values[feature] = query_instance[feature].iat[0]
+        
+        if self.causal_constraints is not None:
+            self.feature_range = self.causal_constraints.set_feature_ranges(query_instance, self.feature_range)
 
         # Do predictions once on the query_instance and reuse across to reduce the number
         # inferences.
@@ -309,30 +312,6 @@ class DiceRandom(ExplainerBase):
 
         if sampling_random_seed is not None:
             random.seed(sampling_random_seed)
-
-        # set independent constraints
-        constraints = causal_constraints.single_constraints
-        for feature in self.data_interface.feature_names:
-            # continuous features
-            if feature in self.data_interface.continuous_feature_names:
-                if feature in constraints["cannot_increase"]:
-                    feature_range[feature][1] = min(query_instance[feature].values[0], feature_range[feature][1])
-                if feature in constraints["cannot_decrease"]:
-                    feature_range[feature][0] = max(query_instance[feature].values[0], feature_range[feature][0])
-                if feature in constraints["cannot_change"]:
-                    feature_range[feature][0] = query_instance[feature].values[0]
-                    feature_range[feature][1] = query_instance[feature].values[0]
-            # categorical
-            else:
-                current_index = feature_range[feature].index(query_instance[feature].values[0])
-                if feature in constraints["cannot_increase"]:
-                    feature_range[feature] = feature_range[feature][:(current_index + 1)]
-                if feature in constraints["cannot_decrease"]:
-                    feature_range[feature] = feature_range[feature][current_index:]
-                if feature in constraints["cannot_change"]:
-                    feature_range[feature] = [feature_range[feature][current_index]]
-
-
         
         # generate random samples
         samples = {}

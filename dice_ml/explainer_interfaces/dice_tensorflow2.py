@@ -128,12 +128,17 @@ class DiceTensorFlow2(ExplainerBase):
             #         "permitted range of features should be within their original range")
             # else:
             self.data_interface.permitted_range = permitted_range
-            self.minx, self.maxx = self.data_interface.get_minx_maxx(normalized=True)
+            
+            feature_range = self.data_interface.permitted_range
+            if self.causal_constraints is not None:
+                feature_range = self.causal_constraints.set_feature_ranges(query_instance, self.data_interface.permitted_range)
+            
+            self.minx, self.maxx = self.data_interface.get_minx_maxx(normalized=True, range=feature_range)
             self.cont_minx = []
             self.cont_maxx = []
             for feature in self.data_interface.continuous_feature_names:
-                self.cont_minx.append(self.data_interface.permitted_range[feature][0])
-                self.cont_maxx.append(self.data_interface.permitted_range[feature][1])
+                self.cont_minx.append(feature_range[feature][0])
+                self.cont_maxx.append(feature_range[feature][1])
 
         # if([total_CFs, algorithm, features_to_vary] != self.cf_init_weights):
         self.do_cf_initializations(total_CFs, algorithm, features_to_vary)
@@ -545,19 +550,21 @@ class DiceTensorFlow2(ExplainerBase):
                         current_cf = self.model.transformer.inverse_transform(
                                         self.data_interface.get_decoded_data(cf.numpy()))
                         changes = self.get_changes_to_cf(original_query_instance, current_cf)
-                        
-                        features_that_changed = set(changes.keys())
+
+                        features_that_changed = list(changes.keys())
                         all_features_to_change = {}
                         for feature in features_that_changed:
-
                             if feature in changes:
                                 to_change = causal_constraints.dependencies_to_change(feature, changes[feature])
                                 all_features_to_change = all_features_to_change | to_change
-                                features_that_changed.update(to_change.keys())
+                                features_that_changed += list(to_change.keys())
 
                             features_that_changed.remove(feature)
                         
-                        self.make_changes_to_cf(all_features_to_change, query_instance, cf)
+                        if len(all_features_to_change) > 0:
+                            print(all_features_to_change)
+                        
+                        # self.make_changes_to_cf(all_features_to_change, query_instance, cf)
                                     
 
                 if verbose:
