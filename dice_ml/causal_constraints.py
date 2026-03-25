@@ -163,7 +163,7 @@ class CausalConstraints:
         return changes
                 
 
-    def set_feature_ranges(self, query_instance, feature_ranges):        
+    def set_feature_ranges(self, query_instance, feature_ranges, indices=False):
         for constraint in self.single_constraints:
             for feature in self.single_constraints[constraint]:
                 # continuous
@@ -179,18 +179,34 @@ class CausalConstraints:
                         feature_ranges[feature][1] = query_instance[feature].values[0]
                 # categorical
                 else:
-                    if feature in self.data_interface.categorical_features_ordering:
-                        current_index = feature_ranges[feature].index(query_instance[feature].values[0])
-                        if constraint == "cannot_increase":
-                            feature_ranges[feature] = feature_ranges[feature][:(current_index + 1)]
-                        elif constraint == "cannot_decrease":
-                            feature_ranges[feature] = feature_ranges[feature][current_index:]
-                        elif constraint == "cannot_change":
-                            feature_ranges[feature] = [feature_ranges[feature][current_index]]
+                    if indices:
+                        if feature in self.data_interface.categorical_features_ordering:
+                            ordering = self.data_interface.categorical_features_ordering[feature]
+                            current_index = ordering.index(query_instance[feature].values[0])
+                            if constraint == "cannot_increase":
+                                feature_ranges[feature] = [i for i in range(0, current_index + 1)]
+                            elif constraint == "cannot_decrease":
+                                feature_ranges[feature] = [i for i in range(current_index, len(ordering))]
+                            elif constraint == "cannot_change":
+                                feature_ranges[feature] = [current_index]
+                        else:
+                            if constraint == "cannot_change":
+                                feature_ranges[feature] = [feature_ranges[feature].index(query_instance[feature].values[0])]
+
                     else:
-                        if constraint == "cannot_change":
-                            feature_ranges[feature] = [feature_ranges[feature][current_index]]
-        
+                        if feature in self.data_interface.categorical_features_ordering:
+                            ordering = self.data_interface.categorical_features_ordering[feature]
+                            current_index = ordering.index(query_instance[feature].values[0])
+                            if constraint == "cannot_increase":
+                                feature_ranges[feature] = ordering[:(current_index + 1)]
+                            elif constraint == "cannot_decrease":
+                                feature_ranges[feature] = ordering[current_index:]
+                            elif constraint == "cannot_change":
+                                feature_ranges[feature] = ordering[current_index]
+                        else:
+                            if constraint == "cannot_change":
+                                feature_ranges[feature] = [query_instance[feature].values[0]]
+            
         return feature_ranges
 
     def create_constraint_visualisation(self):

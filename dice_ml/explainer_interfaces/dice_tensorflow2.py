@@ -33,7 +33,6 @@ class DiceTensorFlow2(ExplainerBase):
             temp_ohe_data = self.model.transformer.transform(self.data_interface.data_df.iloc[[0]])
         else:
             temp_ohe_data = None
-        print(temp_ohe_data)
         self.data_interface.create_ohe_params(temp_ohe_data)
         self.minx, self.maxx, self.encoded_categorical_feature_indexes, self.encoded_continuous_feature_indexes, \
             self.cont_minx, self.cont_maxx, self.cont_precisions = self.data_interface.get_data_params_for_gradient_dice()
@@ -122,7 +121,7 @@ class DiceTensorFlow2(ExplainerBase):
             valid = causal_constraints.validate_constraint_features(self.data_interface.feature_names)
             self.causal_constraints = causal_constraints if valid else None
 
-        feature_range = None
+        self.feature_ranges = None
         # check permitted range for continuous features
         if permitted_range is not None:
             # if not self.data_interface.check_features_range(permitted_range):
@@ -130,20 +129,18 @@ class DiceTensorFlow2(ExplainerBase):
             #         "permitted range of features should be within their original range")
             # else:
             self.data_interface.permitted_range = permitted_range
-            feature_range = self.data_interface.permitted_range
-
+            self.feature_ranges = self.data_interface.permitted_range
             
         if self.causal_constraints is not None:
-            feature_range = self.causal_constraints.set_feature_ranges(query_instance, self.data_interface.permitted_range)
-            self.data_interface.permitted_range = feature_range
+            self.feature_ranges = self.causal_constraints.set_feature_ranges(query_instance, (self.data_interface.permitted_range).copy(), indices=True)
 
-        if feature_range is not None:
-            self.minx, self.maxx = self.data_interface.get_minx_maxx(normalized=True, range=feature_range)
+        if self.feature_ranges is not None:
+            self.minx, self.maxx = self.data_interface.get_minx_maxx(normalized=True, range=self.feature_ranges)
             self.cont_minx = []
             self.cont_maxx = []
             for feature in self.data_interface.continuous_feature_names:
-                self.cont_minx.append(feature_range[feature][0])
-                self.cont_maxx.append(feature_range[feature][1])
+                self.cont_minx.append(self.feature_ranges[feature][0])
+                self.cont_maxx.append(self.feature_ranges[feature][1])
         
         # if([total_CFs, algorithm, features_to_vary] != self.cf_init_weights):
         self.do_cf_initializations(total_CFs, algorithm, features_to_vary)
@@ -365,7 +362,7 @@ class DiceTensorFlow2(ExplainerBase):
             one_init = np.array([one_init], dtype=np.float32)
             self.cfs[n].assign(one_init)
 
-    def round_off_cfs(self, assign=False):
+    def round_off_cfs(self, assign=False, cat_indices=None):
         """function for intermediate projection of CFs."""
         temp_cfs = []
         for index, tcf in enumerate(self.cfs):
@@ -378,9 +375,10 @@ class DiceTensorFlow2(ExplainerBase):
                 cf[0, v] = normalized_cont  # assign the projected continuous value
 
             # assigns a single one to the categorical features - ohe
-            for v in self.encoded_categorical_feature_indexes:
+            cat_indices = cat_indices if cat_indices is not None else self.encoded_categorical_feature_indexes
+            for v in cat_indices:
                 maxs = np.argwhere(
-                    cf[0, v[0]:v[-1]+1] == np.amax(cf[0, v[0]:v[-1]+1])).flatten().tolist()
+                    cf[0, v] == np.amax(cf[0, v])).flatten().tolist()
                 if len(maxs) > 1:
                     if self.tie_random:
                         ix = random.choice(maxs)
@@ -425,30 +423,41 @@ class DiceTensorFlow2(ExplainerBase):
 
         return changes
 
-    def make_changes_to_cf(self, changes_to_make, query_instance):
-        cat_indices = self.encoded_categorical_feature_indexes
+    def make_changes_to_cf(self, changes_to_make, query_instance, minx, maxx):
+        # TODO: normalise
 
-        for feature in changes_to_make:
-            change = changes_to_make[feature]
+        for index, feature in zip(self.encoded_continuous_feature_indexes, self.data_interface.continuous_feature_names):
             original_value = query_instance[feature].values[0]
+            if feature in changes_to_make:
+                change = changes_to_make[feature]
+                
+                if change == 1:
+                    maxx[index] = original_value
+                elif change == 2:
+                    minx[index] = original_value
+        
+        for indices, feature in zip(self.encoded_categorical_feature_indexes, self.data_interface.categorical_feature_names):
+            original_value = query_instance[feature].values[0]
+            first_index = indices[0]
+            if feature in changes_to_make:
+                change = changes_to_make[feature]
+                if feature in self.data_interface.categorical_features_ordering:
+                    ordering = self.data_interface.categorical_features_ordering[feature]
+                    original_index = ordering.index(original_value) + first_index
+                    
+                    for index in indices:
+                        if change == 1 and index <= original_index:
+                            maxx[index] = 0
+                        elif change == 2 and index >= original_index:
+                            maxx[index] = 0
+                        elif change == 3 and index == original_index:
+                            maxx[index] = 0
+                else:
+                    if change == 3:
+                        original_index = self.feature_ranges[feature].index(original_value) + first_index
+                        maxx[original_index] = 0
 
-            if feature in self.data_interface.continuous_feature_names:
-                if change == 1:
-                    self.feature_ranges[feature][1] = original_value
-                elif change == 2:
-                    self.feature_ranges[feature][0] = original_value
-            elif feature in self.data_interface.categorical_features_ordering:
-                ordering = self.data_interface.categorical_features_ordering[feature]
-                original_index = ordering.index(original_value)
-                if change == 1:
-                    self.feature_ranges[feature] = ordering[:(original_index + 1)]
-                elif change == 2:
-                    self.feature_ranges[feature] = ordering[original_index:]
-                elif change == 3:
-                    self.feature_ranges[feature] = ordering.remove(original_value)
-            elif feature in self.data_interface.categorical_feature_names:
-                if change == 3:
-                    self.feature_ranges[feature] = ordering.remove(original_value)
+        return minx, maxx
 
     def stop_loop(self, itr, loss_diff):
         """Determines the stopping condition for gradient descent."""
@@ -548,6 +557,8 @@ class DiceTensorFlow2(ExplainerBase):
             prev_loss = 0.0
 
             while self.stop_loop(iterations, loss_diff) is False:
+                temp_minx = self.minx
+                temp_maxx = self.maxx
 
                 # compute loss and tape the variables history
                 with tf.GradientTape() as tape:
@@ -563,22 +574,12 @@ class DiceTensorFlow2(ExplainerBase):
                 # apply gradients and update the variables
                 self.optimizer.apply_gradients(zip(grads, self.cfs))
 
-                # projection step
-                for j in range(0, self.total_CFs):
-                    temp_cf = self.cfs[j].numpy()
-                    clip_cf = np.clip(temp_cf, self.minx, self.maxx)  # clipping
-                    # to remove -ve sign before 0.0 in some cases
-                    clip_cf = np.add(clip_cf, np.array(
-                        [np.zeros([self.minx.shape[1]])]))
-                    self.cfs[j].assign(clip_cf)
-                
                 # check if the generated counterfactuals fit with the causal constraints
                 if causal_constraints is not None:
                     for cf in self.cfs:
                         current_cf = self.model.transformer.inverse_transform(
                                         self.data_interface.get_decoded_data(cf.numpy()))
                         changes = self.get_changes_to_cf(original_query_instance, current_cf)
-                        print(changes)
 
                         features_that_changed = list(changes.keys())
                         all_features_to_change = {}
@@ -590,7 +591,18 @@ class DiceTensorFlow2(ExplainerBase):
 
                             features_that_changed.remove(feature)
                                                 
-                        self.make_changes_to_cf(all_features_to_change, query_instance)
+                        temp_minx, temp_maxx = self.make_changes_to_cf(all_features_to_change, original_query_instance, temp_minx, temp_maxx)
+
+                # projection step
+                for j in range(0, self.total_CFs):
+                    temp_cf = self.cfs[j].numpy()
+                    clip_cf = np.clip(temp_cf, temp_minx, temp_maxx)  # clipping
+                    # to remove -ve sign before 0.0 in some cases
+                    clip_cf = np.add(clip_cf, np.array(
+                        [np.zeros([self.minx.shape[1]])]))
+                    self.cfs[j].assign(clip_cf)
+                
+
                 
 
 

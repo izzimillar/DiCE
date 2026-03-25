@@ -179,7 +179,6 @@ class PublicData(_BaseData):
             dummy_feature = pd.get_dummies(data[feature], prefix=feature, drop_first=False)
             if feature in self.categorical_features_ordering:
                 order = [feature + "_" + t for t in self.categorical_features_ordering[feature]]
-                print(order)
                 dummy_feature = dummy_feature.reindex(order, axis=1)
             df = pd.concat([df, dummy_feature], axis=1)
         return df
@@ -513,7 +512,6 @@ class PublicData(_BaseData):
         ohe_base_df = self.prepare_df_for_ohe_encoding()
         temp = pd.concat([ohe_base_df, query_instance], ignore_index=True, sort=False)
         temp = self.one_hot_encode_data(temp)
-        print(temp)
         temp = temp.tail(query_instance.shape[0]).reset_index(drop=True)
         # returns a pandas dataframe with all numeric values
         return self.normalize_data(temp).apply(pd.to_numeric)
