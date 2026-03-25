@@ -5,6 +5,7 @@ import copy
 import random
 import timeit
 
+from dice_ml.causal_constraints import CausalConstraints
 import numpy as np
 import tensorflow as tf
 
@@ -56,7 +57,8 @@ class DiceTensorFlow2(ExplainerBase):
                                   feature_weights="inverse_mad", optimizer="tensorflow:adam", learning_rate=0.05, min_iter=500,
                                   max_iter=5000, project_iter=0, loss_diff_thres=1e-5, loss_converge_maxiter=1, verbose=False,
                                   init_near_query_instance=True, tie_random=False, stopping_threshold=0.5,
-                                  posthoc_sparsity_param=0.1, posthoc_sparsity_algorithm="linear", limit_steps_ls=10000):
+                                  posthoc_sparsity_param=0.1, posthoc_sparsity_algorithm="linear", limit_steps_ls=10000, 
+                                  causal_constraints=None):
         """Generates diverse counterfactual explanations
 
         :param query_instance: Test point of interest. A dictionary of feature names and values or a single row dataframe
@@ -100,6 +102,8 @@ class DiceTensorFlow2(ExplainerBase):
                                            (for instance, income varying from 10k to 1000k) and only if the features
                                            share a monotonic relationship with predicted outcome in the model.
         :param limit_steps_ls: Defines an upper limit for the linear search step in the posthoc_sparsity_enhancement
+        :param causal_constraints: CausalConstraint object that defines causal constraints between features. Contains both
+                                    single and double constraints between features. 
 
         :return: A CounterfactualExamples object to store and visualize the resulting counterfactual explanations
                 (see diverse_counterfactuals.py).
@@ -108,6 +112,14 @@ class DiceTensorFlow2(ExplainerBase):
         # check feature MAD validity and throw warnings
         if feature_weights == "inverse_mad":
             self.data_interface.get_valid_mads(display_warnings=True, return_mads=False)
+
+        # check for constraints
+        if not isinstance(causal_constraints, CausalConstraints):
+            print("Generating counterfactuals without using casual constraints. Some counterfactuals may not be actionable.")
+            self.causal_constraints = None
+        else:
+            valid = causal_constraints.validate_constraint_features(self.data_interface.feature_names)
+            self.causal_constraints = causal_constraints if valid else None
 
         # check permitted range for continuous features
         if permitted_range is not None:
@@ -135,7 +147,7 @@ class DiceTensorFlow2(ExplainerBase):
                                       learning_rate, min_iter, max_iter, project_iter,
                                       loss_diff_thres, loss_converge_maxiter, verbose,
                                       init_near_query_instance, tie_random, stopping_threshold,
-                                      posthoc_sparsity_param, posthoc_sparsity_algorithm, limit_steps_ls)
+                                      posthoc_sparsity_param, posthoc_sparsity_algorithm, limit_steps_ls, self.causal_constraints)
 
         return exp.CounterfactualExamples(
             data_interface=self.data_interface,
@@ -349,7 +361,7 @@ class DiceTensorFlow2(ExplainerBase):
         for index, tcf in enumerate(self.cfs):
             cf = tcf.numpy()
             for i, v in enumerate(self.encoded_continuous_feature_indexes):
-                # continuous feature in orginal scale
+                # continuous feature in original scale
                 org_cont = (cf[0, v]*(self.cont_maxx[i] - self.cont_minx[i])) + self.cont_minx[i]
                 org_cont = round(org_cont, self.cont_precisions[i])  # rounding off
                 normalized_cont = (org_cont - self.cont_minx[i])/(self.cont_maxx[i] - self.cont_minx[i])
@@ -379,6 +391,31 @@ class DiceTensorFlow2(ExplainerBase):
             return None
         else:
             return temp_cfs
+    
+    def get_changes_to_cf(self, query_instance, cf):
+        changes = {}
+        for feature in query_instance:
+            sample = cf[feature].to_numpy()[0]
+            original = query_instance[feature].to_numpy()[0]
+
+            if feature in self.data_interface.continuous_feature_names:
+                change = 0 if sample == original else 1 if sample < original else 2
+            elif feature in self.data_interface.categorical_features_ordering:
+                ordering = self.data_interface.categorical_features_ordering[feature]
+                original_index = ordering.index(original)
+                new_index = ordering.index(sample)
+                diff = original_index - new_index
+                change = 0 if diff == 0 else 1 if diff > 0 else 2
+            else:
+                change = 0 if sample == original else 3
+            
+            if change > 0:
+                changes[feature] = change
+
+        return changes
+
+    def make_changes_to_cf(self, changes_to_make, query_instance, cf):
+        pass
 
     def stop_loop(self, itr, loss_diff):
         """Determines the stopping condition for gradient descent."""
@@ -420,9 +457,9 @@ class DiceTensorFlow2(ExplainerBase):
     def find_counterfactuals(self, query_instance, desired_class, optimizer, learning_rate, min_iter,
                              max_iter, project_iter, loss_diff_thres, loss_converge_maxiter, verbose,
                              init_near_query_instance, tie_random, stopping_threshold, posthoc_sparsity_param,
-                             posthoc_sparsity_algorithm, limit_steps_ls):
+                             posthoc_sparsity_algorithm, limit_steps_ls, causal_constraints):
         """Finds counterfactuals by gradient-descent."""
-
+        original_query_instance = query_instance
         query_instance = self.model.transformer.transform(query_instance).to_numpy()
         self.x1 = tf.constant(query_instance, dtype=tf.float32)
 
@@ -501,6 +538,27 @@ class DiceTensorFlow2(ExplainerBase):
                     clip_cf = np.add(clip_cf, np.array(
                         [np.zeros([self.minx.shape[1]])]))
                     self.cfs[j].assign(clip_cf)
+                
+                # check if the generated counterfactuals fit with the causal constraints
+                if causal_constraints is not None:
+                    for cf in self.cfs:
+                        current_cf = self.model.transformer.inverse_transform(
+                                        self.data_interface.get_decoded_data(cf.numpy()))
+                        changes = self.get_changes_to_cf(original_query_instance, current_cf)
+                        
+                        features_that_changed = set(changes.keys())
+                        all_features_to_change = {}
+                        for feature in features_that_changed:
+
+                            if feature in changes:
+                                to_change = causal_constraints.dependencies_to_change(feature, changes[feature])
+                                all_features_to_change = all_features_to_change | to_change
+                                features_that_changed.update(to_change.keys())
+
+                            features_that_changed.remove(feature)
+                        
+                        self.make_changes_to_cf(all_features_to_change, query_instance, cf)
+                                    
 
                 if verbose:
                     if (iterations) % 50 == 0:

@@ -312,6 +312,15 @@ class PublicData(_BaseData):
         return quantiles
 
     def create_ohe_params(self, one_hot_encoded_data):
+        original_features = []
+        for feature in self.continuous_feature_names:
+            original_features.append(feature)
+        
+        ohe_df = self.prepare_df_for_ohe_encoding()
+        for col in self.categorical_feature_names:
+            original_features += [col]*len(ohe_df[col].value_counts())
+        self.ohe_encoded_original_feature_names = original_features
+        
         if len(self.categorical_feature_names) > 0:
             self.ohe_encoded_feature_names = [x for x in one_hot_encoded_data.columns.tolist(
                 ) if x not in np.array([self.outcome_name])]

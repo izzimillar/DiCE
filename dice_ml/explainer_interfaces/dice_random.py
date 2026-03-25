@@ -382,7 +382,7 @@ class DiceRandom(ExplainerBase):
         changes = pd.DataFrame(changes)
 
         return samples, changes
-
+    
     def get_continuous_samples(self, low, high, precision, size=1000, seed=None):
         if seed is not None:
             np.random.seed(seed)
