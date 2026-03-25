@@ -166,32 +166,36 @@ class CausalConstraints:
     def set_feature_ranges(self, query_instance, feature_ranges, indices=False):
         for constraint in self.single_constraints:
             for feature in self.single_constraints[constraint]:
+                original = query_instance[feature].values[0]
                 # continuous
                 if feature in self.data_interface.continuous_feature_names:
                     low = feature_ranges[feature][0]
                     high = feature_ranges[feature][1]
                     if constraint == "cannot_increase":
-                        feature_ranges[feature][1] = min(query_instance[feature].values[0], high)
+                        feature_ranges[feature][1] = min(original, high)
                     elif constraint == "cannot_decrease":
-                        feature_ranges[feature][0] = max(query_instance[feature].values[0], low)
+                        feature_ranges[feature][0] = max(original, low)
                     elif constraint == "cannot_change":
-                        feature_ranges[feature][0] = query_instance[feature].values[0]
-                        feature_ranges[feature][1] = query_instance[feature].values[0]
+                        feature_ranges[feature][0] = original
+                        feature_ranges[feature][1] = original
                 # categorical
                 else:
                     if indices:
                         if feature in self.data_interface.categorical_features_ordering:
-                            ordering = self.data_interface.categorical_features_ordering[feature]
-                            current_index = ordering.index(query_instance[feature].values[0])
+                            ordered_names = self.data_interface.categorical_features_ordering[feature]
+                            ordered_names = [feature + "_" + val for val in ordered_names]
+                            ordered_index = ordered_names.index(feature + "_" + original)
+                            column_names = [name for name in self.data_interface.ohe_encoded_feature_names if name in ordered_names]
+
                             if constraint == "cannot_increase":
-                                feature_ranges[feature] = [i for i in range(0, current_index + 1)]
+                                feature_ranges[feature] = [column_names.index(ordered_names[i]) for i in range(0, ordered_index)]
                             elif constraint == "cannot_decrease":
-                                feature_ranges[feature] = [i for i in range(current_index, len(ordering))]
+                                feature_ranges[feature] = [column_names.index(ordered_names[i]) for i in range(ordered_index+1, len(ordered_names))]
                             elif constraint == "cannot_change":
-                                feature_ranges[feature] = [current_index]
+                                feature_ranges[feature] = [column_names.index(ordered_names[ordered_index])]
                         else:
                             if constraint == "cannot_change":
-                                feature_ranges[feature] = [feature_ranges[feature].index(query_instance[feature].values[0])]
+                                feature_ranges[feature] = [feature_ranges[feature].index(original)]
 
                     else:
                         if feature in self.data_interface.categorical_features_ordering:

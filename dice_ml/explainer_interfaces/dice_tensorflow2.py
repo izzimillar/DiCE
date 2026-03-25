@@ -135,13 +135,14 @@ class DiceTensorFlow2(ExplainerBase):
             self.feature_ranges = self.causal_constraints.set_feature_ranges(query_instance, (self.data_interface.permitted_range).copy(), indices=True)
 
         if self.feature_ranges is not None:
-            self.minx, self.maxx = self.data_interface.get_minx_maxx(normalized=True, range=self.feature_ranges)
+            self.minx, self.maxx = self.data_interface.get_minx_maxx(normalized=True, rng=self.feature_ranges)
+
             self.cont_minx = []
             self.cont_maxx = []
             for feature in self.data_interface.continuous_feature_names:
                 self.cont_minx.append(self.feature_ranges[feature][0])
                 self.cont_maxx.append(self.feature_ranges[feature][1])
-        
+                    
         # if([total_CFs, algorithm, features_to_vary] != self.cf_init_weights):
         self.do_cf_initializations(total_CFs, algorithm, features_to_vary)
         if [yloss_type, diversity_loss_type, feature_weights] != self.loss_weights:
@@ -409,12 +410,22 @@ class DiceTensorFlow2(ExplainerBase):
 
             if feature in self.data_interface.continuous_feature_names:
                 change = 0 if sample == original else 1 if sample < original else 2
+            
+            # categorical ordered
             elif feature in self.data_interface.categorical_features_ordering:
-                ordering = self.data_interface.categorical_features_ordering[feature]
-                original_index = ordering.index(original)
-                new_index = ordering.index(sample)
-                diff = original_index - new_index
-                change = 0 if diff == 0 else 1 if diff > 0 else 2
+                ordered_names = self.data_interface.categorical_features_ordering[feature]
+                ordered_names = [feature + "_" + val for val in ordered_names]
+
+                original_index = ordered_names.index(feature + "_" + original)
+                sample_name = feature + "_" + sample
+                
+                if sample_name == ordered_names[original_index]:
+                    change = 0
+                elif sample_name in ordered_names[:original_index]:
+                    change = 1
+                elif sample_name in ordered_names[original_index:]:
+                    change = 2
+            # categorical
             else:
                 change = 0 if sample == original else 3
             
@@ -442,15 +453,18 @@ class DiceTensorFlow2(ExplainerBase):
             if feature in changes_to_make:
                 change = changes_to_make[feature]
                 if feature in self.data_interface.categorical_features_ordering:
-                    ordering = self.data_interface.categorical_features_ordering[feature]
-                    original_index = ordering.index(original_value) + first_index
+                    ordered_names = self.data_interface.categorical_features_ordering[feature]
+                    ordered_names = [feature + "_" + val for val in ordered_names]
+
+                    ordered_index = ordered_names.index(feature + "_" + original_value)
                     
                     for index in indices:
-                        if change == 1 and index <= original_index:
+                        column_name = self.data_interface.ohe_encoded_feature_names[index]
+                        if change == 1 and column_name in ordered_names[ordered_index:]:
                             maxx[index] = 0
-                        elif change == 2 and index >= original_index:
+                        elif change == 2 and column_name in ordered_names[:ordered_index+1]:
                             maxx[index] = 0
-                        elif change == 3 and index == original_index:
+                        elif change == 3 and column_name == ordered_names[ordered_index]:
                             maxx[index] = 0
                 else:
                     if change == 3:
@@ -557,8 +571,8 @@ class DiceTensorFlow2(ExplainerBase):
             prev_loss = 0.0
 
             while self.stop_loop(iterations, loss_diff) is False:
-                temp_minx = self.minx
-                temp_maxx = self.maxx
+                temp_minx = self.minx[0]
+                temp_maxx = self.maxx[0]
 
                 # compute loss and tape the variables history
                 with tf.GradientTape() as tape:
@@ -577,8 +591,7 @@ class DiceTensorFlow2(ExplainerBase):
                 # check if the generated counterfactuals fit with the causal constraints
                 if causal_constraints is not None:
                     for cf in self.cfs:
-                        current_cf = self.model.transformer.inverse_transform(
-                                        self.data_interface.get_decoded_data(cf.numpy()))
+                        current_cf = self.model.transformer.inverse_transform(self.data_interface.get_decoded_data(cf.numpy()))
                         changes = self.get_changes_to_cf(original_query_instance, current_cf)
 
                         features_that_changed = list(changes.keys())
@@ -590,8 +603,9 @@ class DiceTensorFlow2(ExplainerBase):
                                 features_that_changed += list(to_change.keys())
 
                             features_that_changed.remove(feature)
-                                                
-                        temp_minx, temp_maxx = self.make_changes_to_cf(all_features_to_change, original_query_instance, temp_minx, temp_maxx)
+
+                        if len(all_features_to_change) > 0:
+                            temp_minx, temp_maxx = self.make_changes_to_cf(all_features_to_change, original_query_instance, temp_minx, temp_maxx)
 
                 # projection step
                 for j in range(0, self.total_CFs):
@@ -601,10 +615,8 @@ class DiceTensorFlow2(ExplainerBase):
                     clip_cf = np.add(clip_cf, np.array(
                         [np.zeros([self.minx.shape[1]])]))
                     self.cfs[j].assign(clip_cf)
-                
-
-                
-
+                    current_cf = self.model.transformer.inverse_transform(self.data_interface.get_decoded_data(self.cfs[j].numpy()))
+            
 
                 if verbose:
                     if (iterations) % 50 == 0:

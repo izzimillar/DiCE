@@ -174,14 +174,7 @@ class PublicData(_BaseData):
 
     def one_hot_encode_data(self, data):
         """One-hot-encodes the data."""
-        df = data[self.continuous_feature_names]
-        for feature in self.categorical_feature_names:
-            dummy_feature = pd.get_dummies(data[feature], prefix=feature, drop_first=False)
-            if feature in self.categorical_features_ordering:
-                order = [feature + "_" + t for t in self.categorical_features_ordering[feature]]
-                dummy_feature = dummy_feature.reindex(order, axis=1)
-            df = pd.concat([df, dummy_feature], axis=1)
-        return df
+        return pd.get_dummies(data, drop_first=False, columns=self.categorical_feature_names)
 
     def normalize_data(self, df):
         """Normalizes continuous features to make them fall in the range [0,1]."""
@@ -256,9 +249,10 @@ class PublicData(_BaseData):
                 feature_range[feature_name] = feature_range_input[feature_name]
         return feature_range
 
-    def get_minx_maxx(self, normalized=True, range=None):
+    def get_minx_maxx(self, normalized=True, rng=None):
         """Gets the min/max value of features in normalized or de-normalized form."""
-        range = range if range is not None else self.permitted_range
+        rng = rng if rng is not None else self.permitted_range
+
 
         minx = np.array([[0.0] * len(self.ohe_encoded_feature_names)])
         maxx = np.array([[1.0] * len(self.ohe_encoded_feature_names)])
@@ -268,13 +262,26 @@ class PublicData(_BaseData):
             min_value = self.data_df[feature_name].min()
 
             if normalized:
-                minx[0][idx] = (range[feature_name]
+                minx[0][idx] = (rng[feature_name]
                                 [0] - min_value) / (max_value - min_value)
-                maxx[0][idx] = (range[feature_name]
+                maxx[0][idx] = (rng[feature_name]
                                 [1] - min_value) / (max_value - min_value)
             else:
-                minx[0][idx] = range[feature_name][0]
-                maxx[0][idx] = range[feature_name][1]
+                minx[0][idx] = rng[feature_name][0]
+                maxx[0][idx] = rng[feature_name][1]
+        
+        index = len(self.continuous_feature_names)
+        cat_indices = self.get_encoded_categorical_feature_indexes()
+        for idx, feature_name in enumerate(self.categorical_feature_names):
+            allowed_values = rng[feature_name]
+            if isinstance(allowed_values[0], int):
+                for n in range(len(cat_indices[idx])):
+                    if n not in allowed_values:
+                        maxx[0][index] = 0
+                    index += 1
+            else:
+                index += len(cat_indices[idx])
+        
         return minx, maxx
 
     def get_mads(self, normalized=False):
@@ -474,10 +481,7 @@ class PublicData(_BaseData):
         levels = []
         colnames = [feat for feat in self.categorical_feature_names]
         for cat_feature in colnames:
-            if cat_feature in self.categorical_features_ordering:
-                levels.append(self.categorical_features_ordering[cat_feature])
-            else:
-                levels.append(self.data_df[cat_feature].cat.categories.tolist())
+            levels.append(self.data_df[cat_feature].cat.categories.tolist())
 
         if len(colnames) > 0:
             df = pd.DataFrame({colnames[0]: levels[0]})
