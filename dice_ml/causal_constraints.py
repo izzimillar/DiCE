@@ -171,9 +171,9 @@ class CausalConstraints:
                     low = feature_ranges[feature][0]
                     high = feature_ranges[feature][1]
                     if constraint == "cannot_increase":
-                        feature_ranges[feature][1] = min(query_instance[feature].values[0], low)
+                        feature_ranges[feature][1] = min(query_instance[feature].values[0], high)
                     elif constraint == "cannot_decrease":
-                        self.feature_range[feature][0] = max(query_instance[feature].values[0], high)
+                        feature_ranges[feature][0] = max(query_instance[feature].values[0], low)
                     elif constraint == "cannot_change":
                         feature_ranges[feature][0] = query_instance[feature].values[0]
                         feature_ranges[feature][1] = query_instance[feature].values[0]

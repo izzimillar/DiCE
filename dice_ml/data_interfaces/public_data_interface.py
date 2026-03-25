@@ -143,7 +143,7 @@ class PublicData(_BaseData):
                         np.int32)
         return data_df
 
-    def get_features_range(self, permitted_range_input=None, causal_constraints=None, features_dict=None):
+    def get_features_range(self, permitted_range_input=None, features_dict=None):
         ranges = {}
         # Getting default ranges based on the dataset
         for feature_name in self.continuous_feature_names:

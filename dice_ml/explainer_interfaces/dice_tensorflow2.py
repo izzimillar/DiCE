@@ -121,6 +121,7 @@ class DiceTensorFlow2(ExplainerBase):
             valid = causal_constraints.validate_constraint_features(self.data_interface.feature_names)
             self.causal_constraints = causal_constraints if valid else None
 
+        feature_range = None
         # check permitted range for continuous features
         if permitted_range is not None:
             # if not self.data_interface.check_features_range(permitted_range):
@@ -128,18 +129,21 @@ class DiceTensorFlow2(ExplainerBase):
             #         "permitted range of features should be within their original range")
             # else:
             self.data_interface.permitted_range = permitted_range
-            
             feature_range = self.data_interface.permitted_range
-            if self.causal_constraints is not None:
-                feature_range = self.causal_constraints.set_feature_ranges(query_instance, self.data_interface.permitted_range)
+
             
+        if self.causal_constraints is not None:
+            feature_range = self.causal_constraints.set_feature_ranges(query_instance, self.data_interface.permitted_range)
+            self.data_interface.permitted_range = feature_range
+
+        if feature_range is not None:
             self.minx, self.maxx = self.data_interface.get_minx_maxx(normalized=True, range=feature_range)
             self.cont_minx = []
             self.cont_maxx = []
             for feature in self.data_interface.continuous_feature_names:
                 self.cont_minx.append(feature_range[feature][0])
                 self.cont_maxx.append(feature_range[feature][1])
-
+        
         # if([total_CFs, algorithm, features_to_vary] != self.cf_init_weights):
         self.do_cf_initializations(total_CFs, algorithm, features_to_vary)
         if [yloss_type, diversity_loss_type, feature_weights] != self.loss_weights:
