@@ -174,7 +174,15 @@ class PublicData(_BaseData):
 
     def one_hot_encode_data(self, data):
         """One-hot-encodes the data."""
-        return pd.get_dummies(data, drop_first=False, columns=self.categorical_feature_names)
+        df = data[self.continuous_feature_names]
+        for feature in self.categorical_feature_names:
+            dummy_feature = pd.get_dummies(data[feature], prefix=feature, drop_first=False)
+            if feature in self.categorical_features_ordering:
+                order = [feature + "_" + t for t in self.categorical_features_ordering[feature]]
+                print(order)
+                dummy_feature = dummy_feature.reindex(order, axis=1)
+            df = pd.concat([df, dummy_feature], axis=1)
+        return df
 
     def normalize_data(self, df):
         """Normalizes continuous features to make them fall in the range [0,1]."""
@@ -467,7 +475,10 @@ class PublicData(_BaseData):
         levels = []
         colnames = [feat for feat in self.categorical_feature_names]
         for cat_feature in colnames:
-            levels.append(self.data_df[cat_feature].cat.categories.tolist())
+            if cat_feature in self.categorical_features_ordering:
+                levels.append(self.categorical_features_ordering[cat_feature])
+            else:
+                levels.append(self.data_df[cat_feature].cat.categories.tolist())
 
         if len(colnames) > 0:
             df = pd.DataFrame({colnames[0]: levels[0]})
@@ -502,6 +513,7 @@ class PublicData(_BaseData):
         ohe_base_df = self.prepare_df_for_ohe_encoding()
         temp = pd.concat([ohe_base_df, query_instance], ignore_index=True, sort=False)
         temp = self.one_hot_encode_data(temp)
+        print(temp)
         temp = temp.tail(query_instance.shape[0]).reset_index(drop=True)
         # returns a pandas dataframe with all numeric values
         return self.normalize_data(temp).apply(pd.to_numeric)

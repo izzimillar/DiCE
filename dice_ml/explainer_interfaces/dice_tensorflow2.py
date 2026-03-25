@@ -33,6 +33,7 @@ class DiceTensorFlow2(ExplainerBase):
             temp_ohe_data = self.model.transformer.transform(self.data_interface.data_df.iloc[[0]])
         else:
             temp_ohe_data = None
+        print(temp_ohe_data)
         self.data_interface.create_ohe_params(temp_ohe_data)
         self.minx, self.maxx, self.encoded_categorical_feature_indexes, self.encoded_continuous_feature_indexes, \
             self.cont_minx, self.cont_maxx, self.cont_precisions = self.data_interface.get_data_params_for_gradient_dice()
@@ -376,6 +377,7 @@ class DiceTensorFlow2(ExplainerBase):
                 normalized_cont = (org_cont - self.cont_minx[i])/(self.cont_maxx[i] - self.cont_minx[i])
                 cf[0, v] = normalized_cont  # assign the projected continuous value
 
+            # assigns a single one to the categorical features - ohe
             for v in self.encoded_categorical_feature_indexes:
                 maxs = np.argwhere(
                     cf[0, v[0]:v[-1]+1] == np.amax(cf[0, v[0]:v[-1]+1])).flatten().tolist()
@@ -423,8 +425,30 @@ class DiceTensorFlow2(ExplainerBase):
 
         return changes
 
-    def make_changes_to_cf(self, changes_to_make, query_instance, cf):
-        pass
+    def make_changes_to_cf(self, changes_to_make, query_instance):
+        cat_indices = self.encoded_categorical_feature_indexes
+
+        for feature in changes_to_make:
+            change = changes_to_make[feature]
+            original_value = query_instance[feature].values[0]
+
+            if feature in self.data_interface.continuous_feature_names:
+                if change == 1:
+                    self.feature_ranges[feature][1] = original_value
+                elif change == 2:
+                    self.feature_ranges[feature][0] = original_value
+            elif feature in self.data_interface.categorical_features_ordering:
+                ordering = self.data_interface.categorical_features_ordering[feature]
+                original_index = ordering.index(original_value)
+                if change == 1:
+                    self.feature_ranges[feature] = ordering[:(original_index + 1)]
+                elif change == 2:
+                    self.feature_ranges[feature] = ordering[original_index:]
+                elif change == 3:
+                    self.feature_ranges[feature] = ordering.remove(original_value)
+            elif feature in self.data_interface.categorical_feature_names:
+                if change == 3:
+                    self.feature_ranges[feature] = ordering.remove(original_value)
 
     def stop_loop(self, itr, loss_diff):
         """Determines the stopping condition for gradient descent."""
@@ -554,6 +578,7 @@ class DiceTensorFlow2(ExplainerBase):
                         current_cf = self.model.transformer.inverse_transform(
                                         self.data_interface.get_decoded_data(cf.numpy()))
                         changes = self.get_changes_to_cf(original_query_instance, current_cf)
+                        print(changes)
 
                         features_that_changed = list(changes.keys())
                         all_features_to_change = {}
@@ -564,12 +589,10 @@ class DiceTensorFlow2(ExplainerBase):
                                 features_that_changed += list(to_change.keys())
 
                             features_that_changed.remove(feature)
-                        
-                        if len(all_features_to_change) > 0:
-                            print(all_features_to_change)
-                        
-                        # self.make_changes_to_cf(all_features_to_change, query_instance, cf)
-                                    
+                                                
+                        self.make_changes_to_cf(all_features_to_change, query_instance)
+                
+
 
                 if verbose:
                     if (iterations) % 50 == 0:
