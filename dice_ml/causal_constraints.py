@@ -183,19 +183,19 @@ class CausalConstraints:
                     if indices:
                         if feature in self.data_interface.categorical_features_ordering:
                             ordered_names = self.data_interface.categorical_features_ordering[feature]
-                            ordered_names = [feature + "_" + val for val in ordered_names]
-                            ordered_index = ordered_names.index(feature + "_" + original)
-                            column_names = [name for name in self.data_interface.ohe_encoded_feature_names if name in ordered_names]
+                            # ordered_names = [feature + "_" + val for val in ordered_names]
+                            ordered_index = ordered_names.index(original)
+                            column_names = sorted(self.data_interface.data_df[feature].cat.categories.tolist())
 
                             if constraint == "cannot_increase":
-                                feature_ranges[feature] = [column_names.index(ordered_names[i]) for i in range(0, ordered_index)]
+                                feature_ranges[feature] = [column_names.index(ordered_names[i]) for i in range(0, ordered_index+1)]
                             elif constraint == "cannot_decrease":
-                                feature_ranges[feature] = [column_names.index(ordered_names[i]) for i in range(ordered_index+1, len(ordered_names))]
+                                feature_ranges[feature] = [column_names.index(ordered_names[i]) for i in range(ordered_index, len(ordered_names))]
                             elif constraint == "cannot_change":
                                 feature_ranges[feature] = [column_names.index(ordered_names[ordered_index])]
                         else:
                             if constraint == "cannot_change":
-                                feature_ranges[feature] = [feature_ranges[feature].index(original)]
+                                feature_ranges[feature] = [sorted(feature_ranges[feature]).index(original)]
 
                     else:
                         if feature in self.data_interface.categorical_features_ordering:

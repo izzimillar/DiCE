@@ -125,6 +125,12 @@ class CounterfactualExplanations:
         
         return proximity / len(self.cf_examples_list)
 
+    def calculate_cat_diversity(self):
+        pass
+
+    def calculate_cont_diversity(self):
+        pass
+
 
     @staticmethod
     def _check_cf_exp_output_against_json_schema(

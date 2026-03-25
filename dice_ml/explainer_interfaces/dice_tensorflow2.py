@@ -142,7 +142,7 @@ class DiceTensorFlow2(ExplainerBase):
             for feature in self.data_interface.continuous_feature_names:
                 self.cont_minx.append(self.feature_ranges[feature][0])
                 self.cont_maxx.append(self.feature_ranges[feature][1])
-                    
+                                        
         # if([total_CFs, algorithm, features_to_vary] != self.cf_init_weights):
         self.do_cf_initializations(total_CFs, algorithm, features_to_vary)
         if [yloss_type, diversity_loss_type, feature_weights] != self.loss_weights:
@@ -403,49 +403,79 @@ class DiceTensorFlow2(ExplainerBase):
             return temp_cfs
     
     def get_changes_to_cf(self, query_instance, cf):
+        # print("cf")
+        # print(cf[0])
         changes = {}
-        for feature in query_instance:
-            sample = cf[feature].to_numpy()[0]
-            original = query_instance[feature].to_numpy()[0]
+        query_instance = query_instance[0]
+        # print(query_instance)
+        
+        for idx, feature in enumerate(self.data_interface.continuous_feature_names):
+            sample = cf[0][idx]
+            # print(sample)
+            original = query_instance[idx]
+            # print(original)
 
-            if feature in self.data_interface.continuous_feature_names:
-                change = 0 if sample == original else 1 if sample < original else 2
-            
-            # categorical ordered
-            elif feature in self.data_interface.categorical_features_ordering:
-                ordered_names = self.data_interface.categorical_features_ordering[feature]
-                ordered_names = [feature + "_" + val for val in ordered_names]
+            change = 0 if sample == original else 1 if sample < original else 2
+            # print(change)
 
-                original_index = ordered_names.index(feature + "_" + original)
-                sample_name = feature + "_" + sample
-                
-                if sample_name == ordered_names[original_index]:
-                    change = 0
-                elif sample_name in ordered_names[:original_index]:
-                    change = 1
-                elif sample_name in ordered_names[original_index:]:
-                    change = 2
-            # categorical
-            else:
-                change = 0 if sample == original else 3
-            
             if change > 0:
                 changes[feature] = change
+        
+        for indices, feature in zip(self.encoded_categorical_feature_indexes, self.data_interface.categorical_feature_names):
+            if feature in self.data_interface.categorical_features_ordering:
+                ordered = self.data_interface.categorical_features_ordering[feature]
+                # print(ordered)
+                alphabetically = sorted(ordered)
+                # print(alphabetically)
+                original_index = -1
+                current_index = -1
+
+                # print(indices)
+                for i, idx in enumerate(indices):
+                    if cf[0][idx] == 1:
+                        current_index = i
+                    if query_instance[idx] == 1:
+                        original_index = i
+                
+                # print(current_index)
+                # print(original_index)
+
+                if current_index >= 0:
+                    ordered_original = ordered.index(alphabetically[original_index])
+                    ordered_current = ordered.index(alphabetically[current_index])
+
+                    # print(ordered_original)
+                    # print(ordered_current)
+                    
+                    change = 0 if ordered_current == ordered_original else 1 if ordered_current < ordered_original else 2
+                    # print(change)
+
+                    if change > 0:
+                        changes[feature] = change
+
+            else:
+                change = 0
+                # print(indices)
+                for idx in indices:
+                    if cf[0][idx] != query_instance[idx]:
+                        change = 3
+                
+                # print(change)
+                if change > 0:
+                    changes[feature] = change
 
         return changes
 
-    def make_changes_to_cf(self, changes_to_make, query_instance, minx, maxx):
-        # TODO: normalise
-
+    def make_changes_to_cf(self, changes_to_make, query_instance, ohe_query_instance):
         for index, feature in zip(self.encoded_continuous_feature_indexes, self.data_interface.continuous_feature_names):
-            original_value = query_instance[feature].values[0]
             if feature in changes_to_make:
+                original_value = ohe_query_instance[0][index]
                 change = changes_to_make[feature]
                 
-                if change == 1:
-                    maxx[index] = original_value
-                elif change == 2:
-                    minx[index] = original_value
+                if 1 in change:
+                    self.maxx[index] = original_value - (original_value * 0.5)
+                elif 2 in change:
+                    self.minx[index] = original_value + (original_value * 0.5)                
         
         for indices, feature in zip(self.encoded_categorical_feature_indexes, self.data_interface.categorical_feature_names):
             original_value = query_instance[feature].values[0]
@@ -461,17 +491,15 @@ class DiceTensorFlow2(ExplainerBase):
                     for index in indices:
                         column_name = self.data_interface.ohe_encoded_feature_names[index]
                         if change == 1 and column_name in ordered_names[ordered_index:]:
-                            maxx[index] = 0
+                            self.maxx[index] = 0
                         elif change == 2 and column_name in ordered_names[:ordered_index+1]:
-                            maxx[index] = 0
+                            self.maxx[index] = 0
                         elif change == 3 and column_name == ordered_names[ordered_index]:
-                            maxx[index] = 0
+                            self.maxx[index] = 0
                 else:
                     if change == 3:
                         original_index = self.feature_ranges[feature].index(original_value) + first_index
-                        maxx[original_index] = 0
-
-        return minx, maxx
+                        self.maxx[original_index] = 0
 
     def stop_loop(self, itr, loss_diff):
         """Determines the stopping condition for gradient descent."""
@@ -571,9 +599,8 @@ class DiceTensorFlow2(ExplainerBase):
             prev_loss = 0.0
 
             while self.stop_loop(iterations, loss_diff) is False:
-                temp_minx = self.minx[0]
-                temp_maxx = self.maxx[0]
-
+                # print(self.minx)
+                # print(self.maxx[0][6:14])
                 # compute loss and tape the variables history
                 with tf.GradientTape() as tape:
                     loss_value = self.compute_loss()
@@ -588,35 +615,44 @@ class DiceTensorFlow2(ExplainerBase):
                 # apply gradients and update the variables
                 self.optimizer.apply_gradients(zip(grads, self.cfs))
 
-                # check if the generated counterfactuals fit with the causal constraints
-                if causal_constraints is not None:
-                    for cf in self.cfs:
-                        current_cf = self.model.transformer.inverse_transform(self.data_interface.get_decoded_data(cf.numpy()))
-                        changes = self.get_changes_to_cf(original_query_instance, current_cf)
-
-                        features_that_changed = list(changes.keys())
-                        all_features_to_change = {}
-                        for feature in features_that_changed:
-                            if feature in changes:
-                                to_change = causal_constraints.dependencies_to_change(feature, changes[feature])
-                                all_features_to_change = all_features_to_change | to_change
-                                features_that_changed += list(to_change.keys())
-
-                            features_that_changed.remove(feature)
-
-                        if len(all_features_to_change) > 0:
-                            temp_minx, temp_maxx = self.make_changes_to_cf(all_features_to_change, original_query_instance, temp_minx, temp_maxx)
-
                 # projection step
+                # clip to values between min/max
+                # print(self.cfs)
                 for j in range(0, self.total_CFs):
                     temp_cf = self.cfs[j].numpy()
-                    clip_cf = np.clip(temp_cf, temp_minx, temp_maxx)  # clipping
+                    clip_cf = np.clip(temp_cf, self.minx, self.maxx)  # clipping
                     # to remove -ve sign before 0.0 in some cases
                     clip_cf = np.add(clip_cf, np.array(
                         [np.zeros([self.minx.shape[1]])]))
                     self.cfs[j].assign(clip_cf)
-                    current_cf = self.model.transformer.inverse_transform(self.data_interface.get_decoded_data(self.cfs[j].numpy()))
-            
+                # print(self.cfs[0])
+
+
+                temp_cfs_stored = self.round_off_cfs(assign=False)
+                # print(temp_cfs_stored[0])
+
+
+                # print(temp_cfs_stored)
+
+                # check if the generated counterfactuals fit with the causal constraints
+                if causal_constraints is not None:
+                    for cf in temp_cfs_stored:
+                        changes = self.get_changes_to_cf(query_instance, cf)
+                        # print(changes)
+
+                        features_that_changed = list(changes.keys())
+                        all_features_to_change = {}
+                        for feature in features_that_changed:
+                            to_change = causal_constraints.dependencies_to_change(feature, changes[feature])
+                            all_features_to_change = all_features_to_change | to_change
+                        
+                        # if "education" in changes:
+                        #     print(changes)
+                        #     print(all_features_to_change)
+
+                        if len(all_features_to_change) > 0:
+                            self.make_changes_to_cf(all_features_to_change, original_query_instance, query_instance)
+
 
                 if verbose:
                     if (iterations) % 50 == 0:
@@ -626,8 +662,29 @@ class DiceTensorFlow2(ExplainerBase):
                 prev_loss = loss_value
                 iterations += 1
 
+
+                # print(self.cfs[0].numpy()[0,0])
                 # backing up CFs if they are valid
-                temp_cfs_stored = self.round_off_cfs(assign=False)
+                # temp_cfs_stored = self.round_off_cfs(assign=False)
+                # print(temp_cfs_stored[0][0,0])
+
+
+                # temp_cfs_stored = self.round_off_cfs(assign=False)
+
+
+
+                # for cf in temp_cfs_stored:
+                #     current_cf = self.model.transformer.inverse_transform(self.data_interface.get_decoded_data(cf))
+                #     print(current_cf)
+
+
+
+
+
+
+
+
+
                 test_preds_stored = [self.predict_fn(tf.constant(cf, dtype=tf.float32)) for cf in temp_cfs_stored]
 
                 if ((self.target_cf_class == 0 and all(i <= self.stopping_threshold for i in test_preds_stored)) or
@@ -639,7 +696,9 @@ class DiceTensorFlow2(ExplainerBase):
                             self.best_backup_cfs[loop_ix+ix] = copy.deepcopy(temp_cfs_stored[ix])
                             self.best_backup_cfs_preds[loop_ix+ix] = copy.deepcopy(test_preds_stored[ix])
 
-            # rounding off final cfs - not necessary when inter_project=True
+            # print(changes)
+            # print(all_features_to_change)
+
             self.round_off_cfs(assign=True)
 
             # storing final CFs
