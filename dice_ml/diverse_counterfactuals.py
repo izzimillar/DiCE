@@ -305,12 +305,15 @@ class CounterfactualExamples:
         proximity = 0
         cfs = self.final_cfs_df
 
-        for i in range(len(self.final_cfs_df)):
+        for i in range(len(cfs)):
             proximity += self.calculate_cont_distance(cfs.iloc[i])
 
-        proximity = (proximity / len(self.final_cfs_df))
+        if len(cfs) < 1:
+            return 0
+        
+        proximity = (proximity / len(cfs))
 
-        return -proximity
+        return proximity
 
 
     def calculate_cat_proximity(self):
@@ -323,10 +326,13 @@ class CounterfactualExamples:
         distance = 0
         cfs = self.final_cfs_df
 
-        for i in range(len(self.final_cfs_df)):
+        for i in range(len(cfs)):
             distance += self.calculate_cat_distance(cfs.iloc[i])
         
-        proximity = distance / len(self.final_cfs_df)
+        if len(cfs) < 1:
+            return 0
+        
+        proximity = distance / len(cfs)
         return 1 - proximity
     
     def calculate_cat_diversity(self):
@@ -342,6 +348,9 @@ class CounterfactualExamples:
             for j in range(i+1, len(cfs)):
                 diversity += self.calculate_cat_distance(cfs.iloc[i], cfs.iloc[j])
         
+        if len(cfs) <= 1:
+            return 0
+        
         diversity = 1/math.comb(len(cfs), 2) * diversity
         return diversity
 
@@ -356,6 +365,9 @@ class CounterfactualExamples:
         for i in range(len(cfs) - 1):
             for j in range(i+1, len(cfs)):
                 diversity += self.calculate_cont_distance(cfs.iloc[i], cfs.iloc[j])
+        
+        if len(cfs) <= 1:
+            return 0
         
         diversity = 1/math.comb(len(cfs), 2) * diversity
         return diversity
@@ -373,6 +385,9 @@ class CounterfactualExamples:
                     if cfs.iloc[i][feature] != cfs.iloc[j][feature]:
                         diversity += 1
         
+        if len(cfs) <= 1:
+            return 0
+
         diversity = 1/(math.comb(len(cfs), 2) * self.data_interface.number_of_features) * diversity
         return diversity
 
@@ -385,6 +400,9 @@ class CounterfactualExamples:
             for feature in self.data_interface.continuous_feature_names:
                 if cfs.iloc[i][feature] != x[feature].values[0]:
                     sparsity += 1
+
+        if len(cfs) < 1:
+            return 0
 
         sparsity = 1/(len(self.final_cfs_df) * len(self.data_interface.continuous_feature_names)) * sparsity
         return sparsity

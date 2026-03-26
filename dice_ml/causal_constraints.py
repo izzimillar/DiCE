@@ -15,6 +15,10 @@ class CausalConstraints:
             "decrease_with" : {},
             "increase_on_decrease" : {},
             "decrease_on_increase" : {},
+            "change_on_increase" : {},
+            "change_on_decrease" : {},
+            "increase_on_change" : {},
+            "decrease_on_change" : {},
         }
 
         self.single_constraints = {
@@ -48,6 +52,31 @@ class CausalConstraints:
                 "inverse" : "decrease_on_increase",
                 "colour" : "green",
             },
+            "change_on_increase" : {                
+                "depends_on_change" : 2,
+                "dependent_change" : 3,
+                "inverse" : "increase_on_change",
+                "colour" : "green",
+},
+            "change_on_decrease" : {                
+                "depends_on_change" : 1,
+                "dependent_change" : 3,
+                "inverse" : "decrease_on_change",
+                "colour" : "green",
+},
+            "increase_on_change" : {                
+                "depends_on_change" : 3,
+                "dependent_change" : 2,
+                "inverse" : "change_on_increase",
+                "colour" : "green",
+},
+            "decrease_on_change" : {               
+                "depends_on_change" : 3,
+                "dependent_change" : 1,
+                "inverse" : "change_on_decrease",
+                "colour" : "green",
+},
+
 
         }
     

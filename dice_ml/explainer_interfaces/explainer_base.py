@@ -6,6 +6,7 @@ import pickle
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from typing import Any, List
+import dask
 
 import numpy as np
 import pandas as pd

@@ -130,7 +130,7 @@ class CounterfactualExplanations:
         for cf_examples in self.cf_examples_list:
             proximity += cf_examples.calculate_cont_proximity()
         
-        return proximity / len(self.cf_examples_list)
+        return -(proximity / len(self.cf_examples_list))
     
     def calculate_cat_diversity(self):
         diversity = 0
