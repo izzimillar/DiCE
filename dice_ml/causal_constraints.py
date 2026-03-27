@@ -57,27 +57,34 @@ class CausalConstraints:
                 "dependent_change" : 3,
                 "inverse" : "increase_on_change",
                 "colour" : "green",
-},
+            },
             "change_on_decrease" : {                
                 "depends_on_change" : 1,
                 "dependent_change" : 3,
                 "inverse" : "decrease_on_change",
                 "colour" : "green",
-},
+            },
             "increase_on_change" : {                
                 "depends_on_change" : 3,
                 "dependent_change" : 2,
                 "inverse" : "change_on_increase",
                 "colour" : "green",
-},
+            },
             "decrease_on_change" : {               
                 "depends_on_change" : 3,
                 "dependent_change" : 1,
                 "inverse" : "change_on_decrease",
                 "colour" : "green",
-},
-
-
+            },
+            "cannot_increase" : {
+                "should_change" : [0, 1],
+            },
+            "cannot_decrease" : {
+                "should_change" : [0, 2],
+            },
+            "cannot_change" : {
+                "should_change" : [0],
+            },
         }
     
     def validate_constraint_features(self, model_features):
@@ -190,6 +197,42 @@ class CausalConstraints:
                             changes[dependent] = set()
                         changes[dependent].add(should_change)
         return changes
+
+    def get_change_to_original(self, cf, original):
+        changes = {}
+        for feature in self.data_interface.feature_names:
+            # continuous
+            if feature in self.data_interface.continuous_feature_names:
+                changes[feature] = 0 if original[feature] == cf[feature] else 1 if cf[feature] < original[feature] else 2
+            # categorical
+            else:
+                if feature in self.data_interface.categorical_features_ordering:
+                    ordering = self.data_interface.categorical_features_ordering[feature]
+                    og_index = ordering.index(original[feature])
+                    cf_index = ordering.index(cf[feature])
+
+                    changes[feature] = 0 if og_index == cf_index else 1 if cf_index < og_index else 2
+                else:
+                    changes[feature] = 0 if original[feature] == cf[feature] else 3
+        return changes
+    
+    def consistent_with_constraints(self, changes):
+        # single constraints
+        for constraint in self.single_constraints:
+            for feature in self.single_constraints[constraint]:
+                if changes[feature] not in self.constraints_config[constraint]["should_change"]:
+                    return False
+        
+        # dependent constraints
+        for constraint in self.constraints:
+            for feature in self.constraints[constraint]:
+                should_change = self.dependencies_to_change(feature, changes[feature])
+                for dependent in should_change:
+                    if changes[dependent] not in should_change[dependent]:
+                        return False
+                    
+        return True
+
                 
 
     def set_feature_ranges(self, query_instance, feature_ranges, indices=False):

@@ -250,7 +250,7 @@ class ExplainerBase(ABC):
             features_to_vary = self.data_interface.feature_names
 
         if permitted_range is None:  # use the precomputed default
-            self.feature_range = self.data_interface.permitted_range
+            self.feature_range = (self.data_interface.permitted_range).copy()
             feature_ranges_orig = self.feature_range
         else:  # compute the new ranges based on user input
             self.feature_range, feature_ranges_orig = self.data_interface.get_features_range(permitted_range)

@@ -2,6 +2,7 @@ import copy
 import json
 import math
 
+from dice_ml.causal_constraints import CausalConstraints
 import numpy as np
 import pandas as pd
 
@@ -284,7 +285,7 @@ class CounterfactualExamples:
         return dist / len(cont_features)
     
     def calculate_cat_distance(self, cf, x=None):
-        """ dist_cat(c,x) = 1/cat_count * sum p(I(cp = xp))"""
+        """ dist_cat(c,x) = 1/cat_count * sum p(I(cp =/= xp))"""
         x = x if x is not None else self.test_instance_df.iloc[0]
         cat_features = self.data_interface.categorical_feature_names
 
@@ -313,14 +314,14 @@ class CounterfactualExamples:
         
         proximity = (proximity / len(cfs))
 
-        return proximity
+        return -proximity
 
 
     def calculate_cat_proximity(self):
         """ Categorical proximity measure.
         defined as cat_prox = 1-1/count * sum(dist_cat(c, x))
 
-        where dist_cat(c,x) = 1/cat_count * sum p(I(cp = xp))
+        where dist_cat(c,x) = 1/cat_count * sum p(I(cp =/= xp))
         """
 
         distance = 0
@@ -404,5 +405,24 @@ class CounterfactualExamples:
         if len(cfs) < 1:
             return 0
 
-        sparsity = 1/(len(self.final_cfs_df) * len(self.data_interface.continuous_feature_names)) * sparsity
-        return sparsity
+        sparsity = (1/(len(self.final_cfs_df) * len(self.data_interface.continuous_feature_names))) * sparsity
+        return 1-sparsity
+
+
+    def calculate_actionability(self, constraints: CausalConstraints):
+        
+        actionable = 0
+        cfs = self.final_cfs_df
+
+        for i in range(len(cfs)):
+            changes = constraints.get_change_to_original(cfs.iloc[i], self.test_instance_df.iloc[0])
+            consistent = constraints.consistent_with_constraints(changes)
+
+            if consistent:
+                actionable += 1
+
+        if len(cfs) == 0:
+            return 0
+        
+        actionable = actionable / len(cfs)
+        return actionable

@@ -761,8 +761,8 @@ class DiceTensorFlow2(ExplainerBase):
            (self.target_cf_class == 1 and all(i >= self.stopping_threshold for i in self.cfs_preds))):
             self.total_CFs_found = max(loop_find_CFs, self.total_CFs)
             valid_ix = [ix for ix in range(max(loop_find_CFs, self.total_CFs))]  # indexes of valid CFs
-            print('Diverse Counterfactuals found! total time taken: %02d' %
-                  m, 'min %02d' % s, 'sec')
+            # print('Diverse Counterfactuals found! total time taken: %02d' %
+                #   m, 'min %02d' % s, 'sec')
         else:
             self.total_CFs_found = 0
             valid_ix = []  # indexes of valid CFs
@@ -772,15 +772,15 @@ class DiceTensorFlow2(ExplainerBase):
                     self.total_CFs_found += 1
                     valid_ix.append(cf_ix)
 
-            if self.total_CFs_found == 0:
-                print('No Counterfactuals found for the given configuation, perhaps try with different ',
-                      'values of proximity (or diversity) weights or learning rate...',
-                      '; total time taken: %02d' % m, 'min %02d' % s, 'sec')
-            else:
-                print('Only %d (required %d)' % (self.total_CFs_found, max(loop_find_CFs, self.total_CFs)),
-                      ' Diverse Counterfactuals found for the given configuation, perhaps try with different',
-                      'values of proximity (or diversity) weights or learning rate...',
-                      '; total time taken: %02d' % m, 'min %02d' % s, 'sec')
+            # if self.total_CFs_found == 0:
+                # print('No Counterfactuals found for the given configuation, perhaps try with different ',
+                    #   'values of proximity (or diversity) weights or learning rate...',
+                    #   '; total time taken: %02d' % m, 'min %02d' % s, 'sec')
+            # else:
+                # print('Only %d (required %d)' % (self.total_CFs_found, max(loop_find_CFs, self.total_CFs)),
+                #       ' Diverse Counterfactuals found for the given configuation, perhaps try with different',
+                #       'values of proximity (or diversity) weights or learning rate...',
+                #       '; total time taken: %02d' % m, 'min %02d' % s, 'sec')
 
         if final_cfs_df_sparse is not None:
             final_cfs_df_sparse = final_cfs_df_sparse.iloc[valid_ix].reset_index(drop=True)

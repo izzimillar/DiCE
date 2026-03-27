@@ -70,7 +70,7 @@ class DiceRandom(ExplainerBase):
 
         # check constraints are valid
         if not isinstance(causal_constraints, CausalConstraints):
-            print("Generating counterfactuals without using casual constraints. Some counterfactuals may not be actionable.")
+            # print("Generating counterfactuals without using casual constraints. Some counterfactuals may not be actionable.")
             self.causal_constraints = None
         else:
             valid = causal_constraints.validate_constraint_features(self.data_interface.feature_names)
@@ -391,7 +391,10 @@ class DiceRandom(ExplainerBase):
                 sample = random.choices(feature_values[index:], k=size)
         # no constraint or no ordering
         else:
-            sample = random.choices(feature_values, k=size)
+            if order == 3:
+                sample = random.choices(feature_values - [current], k=size)
+            else:
+                sample = random.choices(feature_values, k=size)
 
         return sample
 
@@ -420,17 +423,17 @@ class DiceRandom(ExplainerBase):
             high = feature_ranges[feature_to_change][1]
 
             if change == 1:
-                new_value = self.get_continuous_samples(low, original_value, precisions[feature_to_change], size=1, seed=sampling_random_seed)[0]
+                new_value = self.get_continuous_samples(low, original_value - (original_value * 0.05), precisions[feature_to_change], size=1, seed=sampling_random_seed)[0]
             elif change == 2:
-                new_value = self.get_continuous_samples(original_value, high, precisions[feature_to_change], size=1, seed=sampling_random_seed)[0]
+                new_value = self.get_continuous_samples(original_value + (original_value * 0.05), high, precisions[feature_to_change], size=1, seed=sampling_random_seed)[0]
+            elif change == 3:
+                new_value = self.get_continuous_samples(low, high, precisions[feature_to_change], size=1, seed=sampling_random_seed)[0]
         # categorical features
         else:
             ordering = feature_ranges[feature_to_change]
             ordered_values = feature_to_change in self.data_interface.categorical_features_ordering
 
-            if change == 1:
-                new_value = self.get_categorical_samples(original_value, ordering, ordered=ordered_values, order=change, size=1, seed=sampling_random_seed)[0]
-            elif change == 2:
+            if change != 0:
                 new_value = self.get_categorical_samples(original_value, ordering, ordered=ordered_values, order=change, size=1, seed=sampling_random_seed)[0]
         
         return new_value, change
@@ -457,18 +460,20 @@ class DiceRandom(ExplainerBase):
                     current_change = 3
         
         should_change = 0
-        if (
-            (constraint_type == "increase_with" and change_of_depends_on == 2) 
-            or 
-            (constraint_type == "increase_on_decrease" and change_of_depends_on == 1)
-        ):
-            should_change = 2
-        elif (
-            (constraint_type == "decrease_with" and change_of_depends_on == 1) 
-            or 
-            (constraint_type == "decrease_on_increase" and change_of_depends_on == 2)
-        ):
-            should_change = 1
+
+        should_change = self.causal_constraints.feature_change_for_valid_constraint(constraint_type, change_of_depends_on)
+        # if (
+        #     (constraint_type == "increase_with" and change_of_depends_on == 2) 
+        #     or 
+        #     (constraint_type == "increase_on_decrease" and change_of_depends_on == 1)
+        # ):
+        #     should_change = 2
+        # elif (
+        #     (constraint_type == "decrease_with" and change_of_depends_on == 1) 
+        #     or 
+        #     (constraint_type == "decrease_on_increase" and change_of_depends_on == 2)
+        # ):
+        #     should_change = 1
         
         # if the feature has already changed how it should have done we don't need to update it
         if should_change == current_change:

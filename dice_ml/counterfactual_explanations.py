@@ -159,6 +159,14 @@ class CounterfactualExplanations:
             sparsity += cf_examples.calculate_cont_sparsity()
         
         return sparsity / len(self.cf_examples_list)
+    
+    def calculate_actionability(self, constraints):
+        actionable = 0
+        for cf_examples in self.cf_examples_list:
+            actionable += cf_examples.calculate_actionability(constraints)
+        
+        return actionable / len(self.cf_examples_list)
+
 
     @staticmethod
     def _check_cf_exp_output_against_json_schema(
